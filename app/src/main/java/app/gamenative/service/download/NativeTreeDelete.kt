@@ -24,10 +24,6 @@ object NativeTreeDelete {
     /** Returns deleted entries (files + dirs), or -1 on hard failure. */
     private external fun nativeDeleteTree(path: String, workers: Int): Long
 
-    init {
-        GameDownloadNative.ensureLoaded()
-    }
-
     /** True when `libgndownload.so` loads and binds. */
     fun isAvailable(): Boolean = try {
         GameDownloadNative.ensureLoaded()
