@@ -371,6 +371,8 @@ object ModArchiveExtractor {
         return when {
             message.contains("encrypted", ignoreCase = true) ->
                 UnsupportedModArchiveException("Encrypted $label archives are not supported")
+            message.contains("checksum", ignoreCase = true) ->
+                IOException("$label archive is damaged or incomplete (checksum validation failed). Retry the download.", error)
             message.contains("multi-volume", ignoreCase = true) ||
                 message.contains("multi volume", ignoreCase = true) ||
                 message.contains("volume", ignoreCase = true) ->

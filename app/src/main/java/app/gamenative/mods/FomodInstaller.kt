@@ -8,6 +8,7 @@ import org.w3c.dom.Node
 import timber.log.Timber
 import java.io.File
 import java.io.IOException
+import java.util.Locale
 import javax.xml.parsers.DocumentBuilderFactory
 
 data class FomodInstaller(
@@ -15,6 +16,7 @@ data class FomodInstaller(
     val requiredFiles: List<FomodFileMapping>,
     val steps: List<FomodStep>,
     val conditionalFileInstalls: List<FomodConditionalFileInstall> = emptyList(),
+    val moduleDependencies: FomodDependencyExpression = FomodDependencyExpression(),
     val unsupportedWarnings: List<String> = emptyList(),
     val basePath: String = "",
 )
@@ -60,18 +62,40 @@ data class FomodTypePattern(
 data class FomodDependencyExpression(
     val operator: FomodDependencyOperator = FomodDependencyOperator.AND,
     val flagDependencies: List<FomodFlagDependency> = emptyList(),
+    val fileDependencies: List<FomodFileDependency> = emptyList(),
+    val pluginDependencies: List<FomodPluginDependency> = emptyList(),
+    val gameDependencies: List<FomodGameDependency> = emptyList(),
     val childGroups: List<FomodDependencyExpression> = emptyList(),
     val unsupportedDependencyCount: Int = 0,
 ) {
-    fun matches(flags: Map<String, String>): Boolean {
-        val results = flagDependencies.map { dependency ->
-            flags[dependency.flag]?.equals(dependency.value, ignoreCase = true) == true
-        } + childGroups.map { it.matches(flags) }
+    fun matches(flags: Map<String, String>): Boolean =
+        evaluate(flags, FomodEnvironmentSnapshot()) == FomodFactState.TRUE
 
-        if (results.isEmpty()) return unsupportedDependencyCount == 0
+    fun evaluate(flags: Map<String, String>, environment: FomodEnvironmentSnapshot): FomodFactState {
+        val results = flagDependencies.map { dependency ->
+            if (flags[dependency.flag]?.equals(dependency.value, ignoreCase = true) == true) {
+                FomodFactState.TRUE
+            } else {
+                FomodFactState.FALSE
+            }
+        } + fileDependencies.map(environment::evaluate) +
+            pluginDependencies.map(environment::evaluate) +
+            gameDependencies.map(environment::evaluate) +
+            childGroups.map { it.evaluate(flags, environment) } +
+            List(unsupportedDependencyCount) { FomodFactState.UNKNOWN }
+
+        if (results.isEmpty()) return FomodFactState.TRUE
         return when (operator) {
-            FomodDependencyOperator.AND -> unsupportedDependencyCount == 0 && results.all { it }
-            FomodDependencyOperator.OR -> results.any { it }
+            FomodDependencyOperator.AND -> when {
+                FomodFactState.FALSE in results -> FomodFactState.FALSE
+                FomodFactState.UNKNOWN in results -> FomodFactState.UNKNOWN
+                else -> FomodFactState.TRUE
+            }
+            FomodDependencyOperator.OR -> when {
+                FomodFactState.TRUE in results -> FomodFactState.TRUE
+                FomodFactState.UNKNOWN in results -> FomodFactState.UNKNOWN
+                else -> FomodFactState.FALSE
+            }
         }
     }
 
@@ -104,13 +128,28 @@ enum class FomodPluginType {
     COULD_BE_USABLE,
 }
 
-fun FomodPlugin.effectiveType(flags: Map<String, String>): FomodPluginType =
-    typePatterns.firstOrNull { it.dependencies.matches(flags) }?.type ?: type
+fun FomodPlugin.effectiveType(
+    flags: Map<String, String>,
+    environment: FomodEnvironmentSnapshot = FomodEnvironmentSnapshot(),
+): FomodPluginType = typePatterns.firstOrNull {
+    it.dependencies.evaluate(flags, environment) == FomodFactState.TRUE
+}?.type ?: type
 
 data class FomodRecipeGenerationResult(
     val recipes: List<ModPlacementRecipe>,
-    val unsupportedMappings: List<FomodFileMapping>,
+    val plan: ModInstallPlan? = null,
+    val blockingIssues: List<String> = emptyList(),
 )
+
+data class FomodFileDependency(val file: String, val state: FomodRequiredFileState)
+
+data class FomodPluginDependency(val plugin: String, val state: FomodRequiredFileState)
+
+data class FomodGameDependency(val version: String)
+
+enum class FomodRequiredFileState { ACTIVE, INACTIVE, MISSING }
+
+enum class FomodFactState { TRUE, FALSE, UNKNOWN }
 
 object FomodInstallerDetector {
     fun moduleConfigFile(extractedRoot: File): File? =
@@ -155,6 +194,7 @@ object FomodParser {
             ?.childElements("pattern")
             ?.mapNotNull { parseConditionalPattern(it) }
             .orEmpty()
+        val moduleDependencies = parseDependencies(root.firstChildElement("moduleDependencies"))
         val steps = root.firstChildElement("installSteps")
             ?.childElements("installStep")
             ?.map { step ->
@@ -176,13 +216,14 @@ object FomodParser {
                 )
             }
             .orEmpty()
-        unsupported += unsupportedFeatureWarnings(root, conditionalFileInstalls, steps)
+        unsupported += unsupportedFeatureWarnings(root, moduleDependencies, conditionalFileInstalls, steps)
 
         return FomodInstaller(
             moduleName = root.firstChildElement("moduleName")?.textContent?.trim().orEmpty(),
             requiredFiles = root.firstChildElement("requiredInstallFiles")?.fileMappings().orEmpty(),
             steps = steps,
             conditionalFileInstalls = conditionalFileInstalls,
+            moduleDependencies = moduleDependencies,
             unsupportedWarnings = unsupported,
             basePath = basePath,
         )
@@ -221,6 +262,9 @@ object FomodParser {
     private fun parseDependencies(dependencies: Element?): FomodDependencyExpression {
         if (dependencies == null) return FomodDependencyExpression()
         val flagDependencies = mutableListOf<FomodFlagDependency>()
+        val fileDependencies = mutableListOf<FomodFileDependency>()
+        val pluginDependencies = mutableListOf<FomodPluginDependency>()
+        val gameDependencies = mutableListOf<FomodGameDependency>()
         val childGroups = mutableListOf<FomodDependencyExpression>()
         var unsupportedCount = 0
 
@@ -229,7 +273,35 @@ object FomodParser {
                 child.tagName.equals("flagDependency", ignoreCase = true) -> {
                     val flag = child.attr("flag").trim()
                     val value = child.attr("value").trim()
-                    if (flag.isBlank()) unsupportedCount++ else flagDependencies += FomodFlagDependency(flag, value)
+                    if (flag.isBlank()) {
+                        unsupportedCount++
+                    } else {
+                        flagDependencies += FomodFlagDependency(flag, value)
+                    }
+                }
+                child.tagName.equals("fileDependency", ignoreCase = true) -> {
+                    val file = child.attr("file").trim().replace('\\', '/')
+                    if (file.isBlank()) {
+                        unsupportedCount++
+                    } else {
+                        fileDependencies += FomodFileDependency(file, requiredFileState(child.attr("state")))
+                    }
+                }
+                child.tagName.equals("pluginDependency", ignoreCase = true) -> {
+                    val plugin = child.attr("plugin").ifBlank { child.attr("file") }.trim()
+                    if (plugin.isBlank()) {
+                        unsupportedCount++
+                    } else {
+                        pluginDependencies += FomodPluginDependency(plugin, requiredFileState(child.attr("state")))
+                    }
+                }
+                child.tagName.equals("gameDependency", ignoreCase = true) -> {
+                    val version = child.attr("version").trim()
+                    if (version.isBlank()) {
+                        unsupportedCount++
+                    } else {
+                        gameDependencies += FomodGameDependency(version)
+                    }
                 }
                 child.tagName.equals("dependencies", ignoreCase = true) -> childGroups += parseDependencies(child)
                 child.tagName.endsWith("Dependency", ignoreCase = true) -> unsupportedCount++
@@ -239,6 +311,9 @@ object FomodParser {
         return FomodDependencyExpression(
             operator = dependencyOperator(dependencies.attr("operator")),
             flagDependencies = flagDependencies,
+            fileDependencies = fileDependencies,
+            pluginDependencies = pluginDependencies,
+            gameDependencies = gameDependencies,
             childGroups = childGroups,
             unsupportedDependencyCount = unsupportedCount,
         )
@@ -258,16 +333,22 @@ object FomodParser {
                 )
             }
 
-    private fun groupType(value: String): FomodGroupType = when (value.lowercase()) {
+    private fun groupType(value: String): FomodGroupType = when (value.lowercase(Locale.ROOT)) {
         "selectexactlyone" -> FomodGroupType.SELECT_EXACTLY_ONE
         "selectatmostone" -> FomodGroupType.SELECT_AT_MOST_ONE
         "selectatleastone" -> FomodGroupType.SELECT_AT_LEAST_ONE
         else -> FomodGroupType.SELECT_ANY
     }
 
-    private fun dependencyOperator(value: String): FomodDependencyOperator = when (value.lowercase()) {
+    private fun dependencyOperator(value: String): FomodDependencyOperator = when (value.lowercase(Locale.ROOT)) {
         "or" -> FomodDependencyOperator.OR
         else -> FomodDependencyOperator.AND
+    }
+
+    private fun requiredFileState(value: String): FomodRequiredFileState = when (value.lowercase(Locale.ROOT)) {
+        "inactive" -> FomodRequiredFileState.INACTIVE
+        "missing" -> FomodRequiredFileState.MISSING
+        else -> FomodRequiredFileState.ACTIVE
     }
 
     private fun pluginType(typeDescriptor: Element?): FomodPluginType {
@@ -294,7 +375,7 @@ object FomodParser {
             .orEmpty()
 
     private fun pluginTypeFromName(typeName: String?): FomodPluginType =
-        when (typeName.orEmpty().lowercase()) {
+        when (typeName.orEmpty().lowercase(Locale.ROOT)) {
             "required" -> FomodPluginType.REQUIRED
             "recommended" -> FomodPluginType.RECOMMENDED
             "notusable" -> FomodPluginType.NOT_USABLE
@@ -373,8 +454,31 @@ object FomodRecipeGenerator {
         targetRoot: String = ModTargetRoot.GAME_DIR.name,
         targetRelativePath: String = "Data",
         mode: String = ModPlacementMode.OVERWRITE_COPY.name,
+        extractedRoot: File? = null,
+        environment: FomodEnvironmentSnapshot = FomodEnvironmentSnapshot(),
     ): FomodRecipeGenerationResult {
-        val selectedPlugins = selectedPluginsForKeys(installer, selectedPluginKeys)
+        if (extractedRoot != null) {
+            val evaluation = FomodSelectionEvaluator.evaluate(installer, selectedPluginKeys, environment)
+            val plan = FomodPlanExpander.expand(installer, evaluation, extractedRoot, targetRoot, targetRelativePath, mode)
+            val recipes = plan.files.filter { it.status == PlannedFileStatus.PLACED }.map { file ->
+                val destination = file.targetRelativePath.orEmpty()
+                ModPlacementRecipe(
+                    installId = installId,
+                    sourceSubpath = file.sourceRelativePath,
+                    targetRoot = file.targetRoot ?: targetRoot,
+                    targetRelativePath = destination.substringBeforeLast('/', missingDelimiterValue = ""),
+                    targetFileName = destination.substringAfterLast('/'),
+                    mode = mode,
+                    includeSourceDirectory = false,
+                )
+            }
+            return FomodRecipeGenerationResult(
+                recipes = recipes.distinctBy(::recipeIdentity),
+                plan = plan,
+                blockingIssues = plan.blockingIssues,
+            )
+        }
+        val selectedPlugins = selectedPluginsForKeys(installer, selectedPluginKeys, environment)
         val selectedFiles = selectedFiles(installer, selectedPlugins)
 
         return generateFromFiles(installId, installer.basePath, selectedFiles, targetRoot, targetRelativePath, mode)
@@ -383,6 +487,7 @@ object FomodRecipeGenerator {
     fun selectedPluginsForKeys(
         installer: FomodInstaller,
         selectedPluginKeys: Set<String>,
+        environment: FomodEnvironmentSnapshot = FomodEnvironmentSnapshot(),
     ): List<FomodPlugin> {
         val pluginEntries = installer.steps.flatMapIndexed { stepIndex, step ->
             step.groups.flatMapIndexed { groupIndex, group ->
@@ -401,7 +506,7 @@ object FomodRecipeGenerator {
                 .flatMap { (_, plugin) -> plugin.conditionFlags.entries }
                 .associate { it.key to it.value }
             val requiredKeys = pluginEntries
-                .filter { (_, plugin) -> plugin.effectiveType(flags) == FomodPluginType.REQUIRED }
+                .filter { (_, plugin) -> plugin.effectiveType(flags, environment) == FomodPluginType.REQUIRED }
                 .mapTo(mutableSetOf()) { it.first }
             val next = includedKeys + requiredKeys
             if (next == includedKeys) break
@@ -413,7 +518,7 @@ object FomodRecipeGenerator {
             .flatMap { (_, plugin) -> plugin.conditionFlags.entries }
             .associate { it.key to it.value }
         return pluginEntries.mapNotNull { (key, plugin) ->
-            val effectiveType = plugin.effectiveType(finalFlags)
+            val effectiveType = plugin.effectiveType(finalFlags, environment)
             if (effectiveType == FomodPluginType.REQUIRED || (key in selectedPluginKeys && effectiveType != FomodPluginType.NOT_USABLE)) {
                 plugin
             } else {
@@ -445,7 +550,6 @@ object FomodRecipeGenerator {
         mode: String,
     ): FomodRecipeGenerationResult {
         val recipes = mutableListOf<ModPlacementRecipe>()
-        val unsupported = mutableListOf<FomodFileMapping>()
         selectedFiles
             .sortedWith(compareBy<FomodFileMapping> { it.priority }.thenBy { it.source })
             .forEach { mapping ->
@@ -462,27 +566,25 @@ object FomodRecipeGenerator {
                     return@forEach
                 }
 
-                val sourceName = mapping.source.substringAfterLast('/')
                 val destinationName = destination.substringAfterLast('/')
-                if (!sourceName.equals(destinationName, ignoreCase = true)) {
-                    unsupported += mapping
-                    return@forEach
-                }
                 recipes += ModPlacementRecipe(
                     installId = installId,
                     sourceSubpath = joinPath(basePath, mapping.source),
                     targetRoot = targetRoot,
                     targetRelativePath = joinPath(targetRelativePath, destination.substringBeforeLast('/', missingDelimiterValue = "")),
+                    targetFileName = destinationName,
                     mode = mode,
                     includeSourceDirectory = false,
                 )
             }
 
         return FomodRecipeGenerationResult(
-            recipes = recipes.distinctBy { Triple(it.sourceSubpath, it.targetRoot, it.targetRelativePath) },
-            unsupportedMappings = unsupported,
+            recipes = recipes.distinctBy(::recipeIdentity),
         )
     }
+
+    private fun recipeIdentity(recipe: ModPlacementRecipe): List<String> =
+        listOf(recipe.sourceSubpath, recipe.targetRoot, recipe.targetRelativePath, recipe.targetFileName)
 
     private fun joinPath(left: String, right: String): String =
         listOf(left, right)
@@ -493,6 +595,7 @@ object FomodRecipeGenerator {
 
 private fun unsupportedFeatureWarnings(
     root: Element,
+    moduleDependencies: FomodDependencyExpression,
     conditionalFileInstalls: List<FomodConditionalFileInstall>,
     steps: List<FomodStep>,
 ): List<String> =
@@ -513,11 +616,8 @@ private fun unsupportedFeatureWarnings(
         if (unsupportedTypeRules > 0) {
             add("Some FOMOD option availability rules need manual review")
         }
-        if (root.getElementsByTagName("moduleDependencies").length > 0) {
-            add("FOMOD module dependency rules need manual placement")
-        }
-        if (root.getElementsByTagName("fileDependency").length > 0) {
-            add("Some FOMOD file dependency rules need manual placement")
+        if (moduleDependencies.unsupportedCount() > 0) {
+            add("Some FOMOD module requirements need manual review")
         }
     }.distinct()
 

@@ -84,6 +84,34 @@ class BethesdaPluginManagerTest {
     }
 
     @Test
+    fun detectPlugins_usesRenamedTargetExtension() = runBlocking {
+        val install = install()
+        File(install.extractedPath, "Choice/Plugin.bin").apply {
+            parentFile?.mkdirs()
+            writeText("plugin")
+        }
+        val renamedRecipe = ModPlacementRecipe(
+            installId = install.installId,
+            sourceSubpath = "Choice/Plugin.bin",
+            targetRoot = ModTargetRoot.GAME_DIR.name,
+            targetRelativePath = "Data",
+            targetFileName = "Renamed.esp",
+            mode = ModPlacementMode.OVERWRITE_COPY.name,
+        )
+
+        val plugins = BethesdaPluginManager.detectPlugins(
+            installs = listOf(install),
+            recipesByInstallId = mapOf(install.installId to listOf(renamedRecipe)),
+            prioritiesByInstallId = emptyMap(),
+            gameRootDir = gameDir,
+            winePrefix = "",
+            pluginsFile = null,
+        )
+
+        assertEquals(listOf("Renamed.esp"), plugins.map { it.fileName })
+    }
+
+    @Test
     fun detectPlugins_canDefaultNewPluginsToEnabled() = runBlocking {
         val install = install()
         File(install.extractedPath, "Data/Example.esp").apply {
@@ -102,6 +130,49 @@ class BethesdaPluginManagerTest {
         )
 
         assertEquals(true, plugins.single().enabled)
+    }
+
+    @Test
+    fun detectPlugins_reusesAppliedOwnershipWithoutRebuildingArchivePlan() = runBlocking {
+        val install = install()
+        val source = File(install.extractedPath, "Choices/Cloaks.esp").apply {
+            parentFile?.mkdirs()
+            writeText("esp")
+        }
+        val target = File(gameDir, "Data/Cloaks.esp")
+        val ownership = ModOwnershipManifest(
+            installId = install.installId,
+            appId = install.appId,
+            planDigest = "owned",
+            files = listOf(
+                ModOwnedFile(
+                    sourceRelativePath = source.relativeTo(File(install.extractedPath)).path,
+                    targetRoot = ModTargetRoot.GAME_DIR.name,
+                    targetRelativePath = "Data/Cloaks.esp",
+                    targetPath = target.absolutePath,
+                    normalizedTargetKey = WindowsPathIdentity.absoluteKey(target),
+                    mode = ModPlacementMode.OVERWRITE_COPY.name,
+                    installedHash = "hash",
+                    installedSize = source.length(),
+                    installedMtime = source.lastModified(),
+                    disposition = ModOwnedFileDisposition.CREATED,
+                ),
+            ),
+        )
+
+        val plugins = BethesdaPluginManager.detectPlugins(
+            installs = listOf(install),
+            recipesByInstallId = emptyMap(),
+            prioritiesByInstallId = mapOf(install.installId to 7),
+            gameRootDir = gameDir,
+            winePrefix = "",
+            pluginsFile = File(tempDir, "missing/plugins.txt"),
+            ownershipByInstallId = mapOf(install.installId to ownership),
+            defaultEnabled = true,
+        )
+
+        assertEquals("Cloaks.esp", plugins.single().fileName)
+        assertEquals(source.absolutePath, plugins.single().sourcePath)
     }
 
     @Test

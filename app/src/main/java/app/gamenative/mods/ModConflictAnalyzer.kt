@@ -1,6 +1,7 @@
 package app.gamenative.mods
 
 import app.gamenative.data.ModInstall
+import app.gamenative.data.ModInstallStatus
 import app.gamenative.data.ModPlacementRecipe
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -29,13 +30,36 @@ object ModConflictAnalyzer {
         prioritiesByInstallId: Map<String, Int>,
         gameRootDir: File?,
         winePrefix: String,
+        ownershipByInstallId: Map<String, ModOwnershipManifest> = emptyMap(),
     ): List<ModFileConflictReport> = withContext(Dispatchers.IO) {
         val installById = installs.associateBy { it.installId }
         val plannedFiles = installs.flatMap { install ->
             val recipes = recipesByInstallId[install.installId].orEmpty()
+            val ownership = ownershipByInstallId[install.installId]
+                ?.takeIf { install.status == ModInstallStatus.APPLIED.name && it.state == ModOwnershipState.ACTIVE }
+            if (ownership != null) {
+                return@flatMap ownership.files
+                    .filter { it.active }
+                    .map { file ->
+                        PlannedFile(
+                            installId = install.installId,
+                            source = File(install.extractedPath, file.sourceRelativePath),
+                            target = File(file.targetPath),
+                        )
+                    }
+            }
             runCatching {
-                ModMaterializer.plannedEntries(install, recipes, gameRootDir, winePrefix)
-                    .flatMap { it.toPlannedFiles() }
+                val plan = ModMaterializer.materializationPlan(
+                    install,
+                    recipes,
+                    gameRootDir,
+                    winePrefix,
+                    captureTargetHashes = false,
+                )
+                check(plan.isComplete) { plan.errors.values.joinToString() }
+                plan.files.map { file ->
+                    PlannedFile(file.installId, file.source, file.target)
+                }
             }.getOrElse { error ->
                 Timber.w(error, "Skipping Nexus conflict analysis for install %s", install.installId)
                 emptyList()
@@ -43,9 +67,9 @@ object ModConflictAnalyzer {
         }
 
         plannedFiles
-            .groupBy { it.target.safeCanonicalPath() }
+            .groupBy { WindowsPathIdentity.absoluteKey(it.target) }
             .filterValues { it.map { file -> file.installId }.distinct().size > 1 }
-            .map { (targetPath, files) ->
+            .map { (_, files) ->
                 val sorted = files.sortedWith(
                     compareByDescending<PlannedFile> { prioritiesByInstallId[it.installId] ?: 0 }
                         .thenByDescending { installById[it.installId]?.updatedAt ?: 0L }
@@ -53,8 +77,8 @@ object ModConflictAnalyzer {
                 )
                 val winner = sorted.first()
                 ModFileConflictReport(
-                    targetPath = targetPath,
-                    targetRelativePath = relativeTargetPath(targetPath, gameRootDir, winePrefix),
+                    targetPath = winner.target.absolutePath,
+                    targetRelativePath = relativeTargetPath(winner.target.absolutePath, gameRootDir, winePrefix),
                     winnerInstallId = winner.installId,
                     participants = sorted.map { file ->
                         val install = installById[file.installId]
@@ -77,21 +101,6 @@ object ModConflictAnalyzer {
         val target: File,
     )
 
-    private fun ModPlannedEntry.toPlannedFiles(): List<PlannedFile> {
-        if (source.isFile) {
-            return listOf(PlannedFile(installId, source, target))
-        }
-        if (!source.isDirectory) return emptyList()
-        val sourceRoot = source.canonicalFile
-        return source.walkTopDown()
-            .filter { it.isFile }
-            .mapNotNull { file ->
-                val relative = file.canonicalFile.relativeToOrNull(sourceRoot)?.path ?: return@mapNotNull null
-                PlannedFile(installId, file, File(target, relative))
-            }
-            .toList()
-    }
-
     private fun relativeTargetPath(path: String, gameRootDir: File?, winePrefix: String): String {
         val target = File(path)
         val roots = ModTargetResolver.roots(gameRootDir, winePrefix)
@@ -109,7 +118,4 @@ object ModConflictAnalyzer {
             val fileCanonical = canonicalFile
             fileCanonical == rootCanonical || fileCanonical.path.startsWith(rootCanonical.path + File.separator)
         }.getOrDefault(false)
-
-    private fun File.safeCanonicalPath(): String =
-        runCatching { canonicalFile.absolutePath }.getOrDefault(absolutePath)
 }

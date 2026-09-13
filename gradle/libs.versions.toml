@@ -8,7 +8,7 @@ coreKtx = "1.15.0" # https://mvnrepository.com/artifact/androidx.core/core-ktx
 coroutines = "1.10.2" # https://mvnrepository.com/artifact/org.jetbrains.kotlinx/kotlinx-coroutines-core
 dagger-hilt = "2.55" # https://mvnrepository.com/artifact/com.google.dagger/hilt-android
 dataStore = "1.1.2" # https://mvnrepository.com/artifact/androidx.datastore/datastore-preferences
-espressoCore = "3.6.1" # https://mvnrepository.com/artifact/androidx.test.espresso/espresso-core
+espressoCore = "3.7.0" # https://mvnrepository.com/artifact/androidx.test.espresso/espresso-core
 feature-delivery = "2.1.0" # https://mvnrepository.com/artifact/com.google.android.play/feature-delivery
 play-integrity = "1.6.0" # https://mvnrepository.com/artifact/com.google.android.play/integrity
 hiltNavigationCompose = "1.2.0" # https://mvnrepository.com/artifact/androidx.hilt/hilt-navigation-compose
@@ -59,6 +59,7 @@ androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref =
 androidx-room-ktx = { module = "androidx.room:room-ktx", version.ref = "room-runtime" }
 androidx-room-paging = { module = "androidx.room:room-paging", version.ref = "room-runtime" }
 androidx-room-runtime = { module = "androidx.room:room-runtime", version.ref = "room-runtime" }
+androidx-room-testing = { module = "androidx.room:room-testing", version.ref = "room-runtime" }
 
 # TODO: Remove 'version' once 1.8.0 is rolled into stable BOM, see https://developer.android.com/jetpack/androidx/releases/compose-ui
 #   This fixes `Placement happened before lookahead` crash when animating lists items.

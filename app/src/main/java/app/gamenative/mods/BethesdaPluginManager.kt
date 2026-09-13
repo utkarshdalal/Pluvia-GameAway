@@ -78,6 +78,7 @@ object BethesdaPluginManager {
         gameRootDir: File?,
         winePrefix: String,
         pluginsFile: File?,
+        ownershipByInstallId: Map<String, ModOwnershipManifest> = emptyMap(),
         defaultEnabled: Boolean = false,
     ): List<BethesdaPlugin> = withContext(Dispatchers.IO) {
         val game = gameFromPluginsFile(pluginsFile)
@@ -88,21 +89,40 @@ object BethesdaPluginManager {
             .toMap()
         installs.filter { it.status == ModInstallStatus.APPLIED.name }.flatMap { install ->
             val recipes = recipesByInstallId[install.installId].orEmpty()
+            val ownership = ownershipByInstallId[install.installId]
+                ?.takeIf { it.state == ModOwnershipState.ACTIVE }
             runCatching {
-                ModMaterializer.plannedEntries(install, recipes, gameRootDir, winePrefix)
-                    .flatMap { entry -> entry.toPluginFiles() }
-                    .map { plugin ->
-                        BethesdaPlugin(
-                            fileName = plugin.target.name,
-                            installId = install.installId,
-                            modName = install.modName,
-                            deployedPath = plugin.target.absolutePath,
-                            enabled = existingByPlugin[plugin.target.name.lowercase()]?.enabled ?: defaultEnabled,
-                            priority = prioritiesByInstallId[install.installId] ?: 0,
-                            orderIndex = orderByPlugin[plugin.target.name.lowercase()] ?: Int.MAX_VALUE,
-                            sourcePath = plugin.source.absolutePath,
-                        )
-                    }
+                val pluginFiles = if (ownership != null) {
+                    ownership.files
+                        .asSequence()
+                        .filter { it.active && File(it.targetPath).extension.lowercase() in pluginExtensions }
+                        .map { file -> File(install.extractedPath, file.sourceRelativePath) to File(file.targetPath) }
+                        .toList()
+                } else {
+                    val plan = ModMaterializer.materializationPlan(
+                        install,
+                        recipes,
+                        gameRootDir,
+                        winePrefix,
+                        captureTargetHashes = false,
+                    )
+                    check(plan.isComplete) { plan.errors.values.joinToString() }
+                    plan.files
+                        .filter { file -> file.target.extension.lowercase() in pluginExtensions }
+                        .map { file -> file.source to file.target }
+                }
+                pluginFiles.map { (source, target) ->
+                    BethesdaPlugin(
+                        fileName = target.name,
+                        installId = install.installId,
+                        modName = install.modName,
+                        deployedPath = target.absolutePath,
+                        enabled = existingByPlugin[target.name.lowercase()]?.enabled ?: defaultEnabled,
+                        priority = prioritiesByInstallId[install.installId] ?: 0,
+                        orderIndex = orderByPlugin[target.name.lowercase()] ?: Int.MAX_VALUE,
+                        sourcePath = source.absolutePath,
+                    )
+                }
             }.getOrElse { error ->
                 Timber.w(error, "Skipping Bethesda plugin detection for Nexus install %s", install.installId)
                 emptyList()
@@ -185,7 +205,10 @@ object BethesdaPluginManager {
                 val missingFiles = buildList {
                     if (!targetPlugin.isFile) add(plugin.fileName)
                     sourcePluginSidecars(sourcePlugin).forEach { sourceSidecar ->
-                        val expectedTarget = File(targetPlugin.parentFile ?: return@forEach, sourceSidecar.name)
+                        val expectedTarget = ModTargetResolver.resolveWithin(
+                            targetPlugin.parentFile ?: return@forEach,
+                            sourceSidecar.name,
+                        ) ?: return@forEach
                         if (!expectedTarget.isFile) add(sourceSidecar.name)
                     }
                 }
@@ -282,27 +305,6 @@ object BethesdaPluginManager {
         val fileName = trimmed.removePrefix("*").trim()
         if (fileName.isBlank()) return null
         return PluginEntry(fileName = fileName, enabled = enabled)
-    }
-
-    private data class PlannedPluginFile(val source: File, val target: File)
-
-    private fun ModPlannedEntry.toPluginFiles(): List<PlannedPluginFile> {
-        if (source.isFile) {
-            return if (source.extension.lowercase() in pluginExtensions) {
-                listOf(PlannedPluginFile(source, target))
-            } else {
-                emptyList()
-            }
-        }
-        if (!source.isDirectory) return emptyList()
-        val sourceRoot = source.canonicalFile
-        return source.walkTopDown()
-            .filter { it.isFile && it.extension.lowercase() in pluginExtensions }
-            .mapNotNull { file ->
-                val relative = file.canonicalFile.relativeToOrNull(sourceRoot)?.path ?: return@mapNotNull null
-                PlannedPluginFile(file, File(target, relative))
-            }
-            .toList()
     }
 
     private fun pluginTypeRank(name: String): Int = when (name.substringAfterLast('.', "").lowercase()) {

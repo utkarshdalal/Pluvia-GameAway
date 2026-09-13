@@ -82,7 +82,7 @@ interface ModDao {
     @Query("SELECT * FROM mod_profile WHERE app_id = :appId AND active = 1 LIMIT 1")
     suspend fun getActiveProfileForApp(appId: String): ModProfile?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertProfile(profile: ModProfile)
 
     @Query("UPDATE mod_profile SET name = :name, updated_at = :updatedAt WHERE profile_id = :profileId")

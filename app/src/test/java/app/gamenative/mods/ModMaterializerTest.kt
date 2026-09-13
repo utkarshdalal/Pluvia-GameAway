@@ -101,6 +101,44 @@ class ModMaterializerTest {
     }
 
     @Test
+    fun overwriteCopy_mergesIncomingDirectoryIntoExistingWindowsCasing() = runBlocking {
+        File(extracted, "Data/scripts/example.pex").apply {
+            parentFile?.mkdirs()
+            writeText("compiled")
+        }
+        val existingScripts = File(gameDir, "Data/Scripts").apply { mkdirs() }
+        val install = install()
+        val placement = recipe(
+            sourceSubpath = "Data",
+            targetRelativePath = "Data",
+            mode = ModPlacementMode.OVERWRITE_COPY,
+        )
+
+        val result = ModMaterializer.apply(
+            install = install,
+            recipes = listOf(placement),
+            gameRootDir = gameDir,
+            winePrefix = "",
+            backupRoot = backupDir,
+            allowOverwrite = true,
+        )
+
+        assertTrue(result.errors.isEmpty())
+        assertEquals("compiled", File(existingScripts, "example.pex").readText())
+        assertEquals(
+            listOf("Scripts"),
+            File(gameDir, "Data").listFiles().orEmpty()
+                .filter { it.name.equals("scripts", ignoreCase = true) }
+                .map { it.name },
+        )
+
+        assertTrue(
+            ModMaterializer.removeAppliedFiles(install, listOf(placement), gameDir, "").isEmpty(),
+        )
+        assertFalse(File(existingScripts, "example.pex").exists())
+    }
+
+    @Test
     fun scanConflicts_overwriteCopyIgnoresSameExistingFileAndNewFilesInExistingDirectory() = runBlocking {
         File(extracted, "Data/same.ini").apply {
             parentFile?.mkdirs()
@@ -414,7 +452,7 @@ class ModMaterializerTest {
     }
 
     @Test
-    fun overwriteCopy_partialApplyFailureCanBeRolledBack() = runBlocking {
+    fun overwriteCopy_invalidSavedPlacementFailsBeforeWritingFiles() = runBlocking {
         File(extracted, "new.txt").writeText("new")
         val install = install()
         val recipes = listOf(
@@ -431,18 +469,6 @@ class ModMaterializerTest {
             allowOverwrite = true,
         )
         assertTrue(result.errors.isNotEmpty())
-        assertEquals("new", File(gameDir, "new.txt").readText())
-
-        val restoreSkipped = ModMaterializer.restoreBackups(result.manifests)
-        val restoredTargets = result.manifests.map { it.targetPath }.filterNot { it in restoreSkipped }.toSet()
-        ModMaterializer.removeAppliedFiles(
-            install = install,
-            recipes = recipes,
-            gameRootDir = gameDir,
-            winePrefix = "",
-            restoredOverwriteTargets = restoredTargets,
-        )
-
         assertFalse(File(gameDir, "new.txt").exists())
     }
 
@@ -681,6 +707,52 @@ class ModMaterializerTest {
     }
 
     @Test
+    fun materializationPlan_expandsEveryDirectoryFileOnce() {
+        File(extracted, "Data/Scripts/A.pex").apply {
+            parentFile?.mkdirs()
+            writeText("a")
+        }
+        File(extracted, "Data/Textures/B.dds").apply {
+            parentFile?.mkdirs()
+            writeText("b")
+        }
+
+        val plan = ModMaterializer.materializationPlan(
+            install = install(),
+            recipes = listOf(
+                recipe(mode = ModPlacementMode.OVERWRITE_COPY).copy(
+                    sourceSubpath = "Data",
+                    targetRelativePath = "Data",
+                ),
+            ),
+            gameRootDir = gameDir,
+            winePrefix = "",
+        )
+
+        assertTrue(plan.isComplete)
+        assertEquals(listOf("Data/Scripts/A.pex", "Data/Textures/B.dds"), plan.files.map { it.targetRelativePath }.sorted())
+        assertEquals(2, plan.files.map { it.normalizedTargetKey }.distinct().size)
+    }
+
+    @Test
+    fun onePlan_coalescesNewCaseVariantTargetDirectoriesBeforeApply() = runBlocking {
+        File(extracted, "first/A.pex").apply { parentFile?.mkdirs(); writeText("a") }
+        File(extracted, "second/B.pex").apply { parentFile?.mkdirs(); writeText("b") }
+        val recipes = listOf(
+            recipe(ModPlacementMode.OVERWRITE_COPY, "first", "Data/Scripts"),
+            recipe(ModPlacementMode.OVERWRITE_COPY, "second", "Data/scripts"),
+        )
+
+        val plan = ModMaterializer.materializationPlan(install(), recipes, gameDir, "")
+        val result = ModMaterializer.apply(install(), plan, backupDir, allowOverwrite = true)
+
+        assertTrue(result.errors.toString(), result.errors.isEmpty())
+        assertEquals(1, plan.operations.map { WindowsPathIdentity.absoluteKey(it.target.parentFile!!) }.distinct().size)
+        assertEquals(listOf("Scripts"), File(gameDir, "Data").listFiles().orEmpty().map { it.name })
+        assertEquals(setOf("A.pex", "B.pex"), File(gameDir, "Data/Scripts").listFiles().orEmpty().map { it.name }.toSet())
+    }
+
+    @Test
     fun restoreBackups_replacesMatchingSymlinkWithoutChangingLinkDestination() = runBlocking {
         File(extracted, "config.ini").writeText("modded")
         val target = File(gameDir, "config.ini").apply { writeText("original") }
@@ -709,6 +781,212 @@ class ModMaterializerTest {
         assertEquals("modded", linkedFile.readText())
     }
 
+    @Test
+    fun rollbackAppliedPlan_restoresExistingFilesAndRemovesOnlyNewPlanTargets() = runBlocking {
+        File(extracted, "Data/config.ini").apply { parentFile?.mkdirs(); writeText("modded") }
+        File(extracted, "Data/new.txt").writeText("new")
+        val existing = File(gameDir, "Data/config.ini").apply { parentFile?.mkdirs(); writeText("original") }
+        val created = File(gameDir, "Data/new.txt")
+        val plan = ModMaterializer.materializationPlan(
+            install(),
+            listOf(recipe(ModPlacementMode.OVERWRITE_COPY, "Data", "Data")),
+            gameDir,
+            "",
+        )
+        val applied = ModMaterializer.apply(install(), plan, backupDir, allowOverwrite = true)
+        val restoreSkipped = ModMaterializer.restoreBackups(applied.manifests)
+        val restored = applied.manifests
+            .filter { it.backupPath.isNotBlank() && it.targetPath !in restoreSkipped }
+            .mapTo(mutableSetOf()) { it.targetPath }
+
+        val rollbackSkipped = ModMaterializer.rollbackAppliedPlan(plan, restored)
+
+        assertTrue(rollbackSkipped.toString(), rollbackSkipped.isEmpty())
+        assertEquals("original", existing.readText())
+        assertFalse(created.exists())
+    }
+
+    @Test
+    fun rollbackAppliedPlan_removesOwnedCopyDirectoryMarkerAndDirectory() = runBlocking {
+        File(extracted, "Package/file.txt").apply {
+            parentFile?.mkdirs()
+            writeText("payload")
+        }
+        val plan = ModMaterializer.materializationPlan(
+            install(),
+            listOf(recipe(ModPlacementMode.COPY, targetRelativePath = "Mods")),
+            gameDir,
+            "",
+        )
+        val copiedDirectory = File(gameDir, "Mods/Package")
+
+        val applied = ModMaterializer.apply(install(), plan, backupDir, allowOverwrite = false)
+        assertTrue(applied.errors.toString(), applied.errors.isEmpty())
+        assertTrue(copiedDirectory.isDirectory)
+
+        val rollbackSkipped = ModMaterializer.rollbackAppliedPlan(plan)
+
+        assertTrue(rollbackSkipped.toString(), rollbackSkipped.isEmpty())
+        assertFalse(copiedDirectory.exists())
+    }
+
+    @Test
+    fun reviewedPackageVariant_materializesInsideItsPreservedWrapper() = runBlocking {
+        val paths = listOf(
+            "CharacterEditor/v1/About/About.xml" to "old-version",
+            "CharacterEditor/v1/Assemblies/Editor.dll" to "old-version",
+            "CharacterEditor/v1.6/About/About.xml" to "selected-version",
+            "CharacterEditor/v1.6/Assemblies/Editor.dll" to "selected-version",
+            "CharacterEditor/Textures/Icon.png" to "common",
+        )
+        paths.forEach { (path, contents) ->
+            File(extracted, path).apply {
+                parentFile?.mkdirs()
+                writeText(contents)
+            }
+        }
+        val entries = paths.map { (path, _) -> ModArchiveEntry(path, directory = false, sizeBytes = 1L) }
+        val context = AutomaticPlacementContext(defaultTargetRelativePath = "Mods", defaultTargetIsProven = true)
+        val initial = AutomaticPlacementPlanner.plan("Colony game", entries, context = context)
+        val group = initial.optionGroups.single()
+        val candidate = AutomaticPlacementPlanner.plan(
+            "Colony game",
+            entries,
+            selectedOptions = mapOf(group.stableId to "CharacterEditor/v1.6"),
+            context = context,
+        ).recommended!!
+        val recipes = candidate.drafts.map { draft ->
+            ModPlacementRecipe(
+                installId = "install",
+                sourceSubpath = draft.sourceSubpath,
+                targetRoot = draft.targetRoot,
+                targetRelativePath = draft.targetRelativePath,
+                mode = draft.mode,
+                includeSourceDirectory = draft.includeSourceDirectory,
+            )
+        }
+        val plan = ModMaterializer.materializationPlan(install(), recipes, gameDir, "", reviewedPlan = candidate.plan)
+        val result = ModMaterializer.apply(install(), plan, backupDir, allowOverwrite = true)
+
+        assertTrue(result.errors.toString(), result.errors.isEmpty())
+        assertEquals("selected-version", File(gameDir, "Mods/CharacterEditor/Assemblies/Editor.dll").readText())
+        assertEquals("common", File(gameDir, "Mods/CharacterEditor/Textures/Icon.png").readText())
+        assertFalse(File(gameDir, "Mods/CharacterEditor/v1.6").exists())
+    }
+
+    @Test
+    fun missingTargetCheck_rejectsARegularFileInPlaceOfASymlink() {
+        File(extracted, "payload.txt").writeText("source")
+        File(gameDir, "linked.txt").writeText("replacement")
+        val appliedInstall = install().copy(status = ModInstallStatus.APPLIED.name)
+
+        assertTrue(
+            NexusModManager.hasMissingAppliedTargets(
+                appliedInstall,
+                listOf(recipe(ModPlacementMode.SYMLINK, "payload.txt", "linked.txt")),
+                gameDir,
+                "",
+            ),
+        )
+    }
+
+    @Test
+    fun apply_refusesToMaterializeAnyPartOfAnIncompleteReviewedPlan() = runBlocking {
+        File(extracted, "ready.txt").writeText("ready")
+        val targetPath = "Data/ready.txt"
+        val reviewed = ModInstallPlan(
+            files = listOf(
+                PlannedModFile(
+                    sourceRelativePath = "ready.txt",
+                    targetRoot = ModTargetRoot.GAME_DIR.name,
+                    targetRelativePath = targetPath,
+                    normalizedTargetKey = ModTargetResolver.normalizedTargetKey(ModTargetRoot.GAME_DIR.name, targetPath),
+                    status = PlannedFileStatus.PLACED,
+                    origin = PlacementOrigin.MANUAL_RECIPE,
+                    reason = "fixture",
+                ),
+                PlannedModFile(
+                    sourceRelativePath = "unresolved.txt",
+                    status = PlannedFileStatus.UNSUPPORTED,
+                    origin = PlacementOrigin.MANUAL_RECIPE,
+                    reason = "No destination was proven",
+                ),
+            ),
+        )
+        val plan = ModMaterializer.materializationPlan(install(), emptyList(), gameDir, "", reviewedPlan = reviewed)
+
+        val result = ModMaterializer.apply(install(), plan, backupDir, allowOverwrite = true)
+
+        assertEquals(0, result.created)
+        assertTrue(result.errors.containsKey("unresolved.txt"))
+        assertFalse(File(gameDir, targetPath).exists())
+    }
+
+    @Test
+    fun repairMissingTargets_refusesAnIncompleteReviewedPlan() = runBlocking {
+        File(extracted, "ready.txt").writeText("ready")
+        val targetPath = "Data/ready.txt"
+        val reviewed = ModInstallPlan(
+            files = listOf(
+                PlannedModFile(
+                    sourceRelativePath = "ready.txt",
+                    targetRoot = ModTargetRoot.GAME_DIR.name,
+                    targetRelativePath = targetPath,
+                    normalizedTargetKey = ModTargetResolver.normalizedTargetKey(ModTargetRoot.GAME_DIR.name, targetPath),
+                    status = PlannedFileStatus.PLACED,
+                    origin = PlacementOrigin.MANUAL_RECIPE,
+                    reason = "fixture",
+                ),
+                PlannedModFile(
+                    sourceRelativePath = "unresolved.txt",
+                    status = PlannedFileStatus.UNSUPPORTED,
+                    origin = PlacementOrigin.MANUAL_RECIPE,
+                    reason = "No destination was proven",
+                ),
+            ),
+        )
+
+        val result = ModMaterializer.repairMissingTargets(
+            install = install().copy(status = ModInstallStatus.APPLIED.name),
+            recipes = emptyList(),
+            gameRootDir = gameDir,
+            winePrefix = "",
+            reviewedPlan = reviewed,
+        )
+
+        assertEquals(0, result.created)
+        assertTrue(result.errors.containsKey("unresolved.txt"))
+        assertFalse(File(gameDir, targetPath).exists())
+    }
+
+    @Test
+    fun reviewedCustomAbsoluteTarget_usesTheCanonicalTargetIdentity() = runBlocking {
+        File(extracted, "asset.bin").writeText("payload")
+        val target = File(gameDir, "Custom/asset.bin")
+        val reviewed = ModInstallPlan(
+            files = listOf(
+                PlannedModFile(
+                    sourceRelativePath = "asset.bin",
+                    targetRoot = ModTargetRoot.CUSTOM_ABSOLUTE.name,
+                    targetRelativePath = target.absolutePath,
+                    normalizedTargetKey = ModTargetResolver.normalizedTargetKey(
+                        ModTargetRoot.CUSTOM_ABSOLUTE.name,
+                        target.absolutePath,
+                    ),
+                    status = PlannedFileStatus.PLACED,
+                    origin = PlacementOrigin.MANUAL_RECIPE,
+                    reason = "fixture",
+                ),
+            ),
+        ).withRiskApproval(true)
+        val plan = ModMaterializer.materializationPlan(install(), emptyList(), gameDir, "", reviewedPlan = reviewed)
+
+        val result = ModMaterializer.apply(install(), plan, backupDir, allowOverwrite = true)
+
+        assertTrue(result.errors.toString(), result.errors.isEmpty())
+        assertEquals("payload", target.readText())
+    }
+
     private fun install() = ModInstall(
         installId = "install",
         appId = "STEAM_1",
@@ -721,11 +999,15 @@ class ModMaterializerTest {
         extractedPath = extracted.absolutePath,
     )
 
-    private fun recipe(mode: ModPlacementMode) = ModPlacementRecipe(
+    private fun recipe(
+        mode: ModPlacementMode,
+        sourceSubpath: String = "",
+        targetRelativePath: String = "",
+    ) = ModPlacementRecipe(
         installId = "install",
-        sourceSubpath = "",
+        sourceSubpath = sourceSubpath,
         targetRoot = ModTargetRoot.GAME_DIR.name,
-        targetRelativePath = "",
+        targetRelativePath = targetRelativePath,
         mode = mode.name,
     )
 }

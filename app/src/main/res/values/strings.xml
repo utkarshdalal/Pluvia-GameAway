@@ -1,4 +1,4 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">GameNative</string>
     <string name="login_user">User Login</string>
     <string name="login_2fa">Two Factor</string>
@@ -1989,6 +1989,7 @@
     <string name="nexus_plugin_missing_sidecars">Related archive files are missing from the game folder: %1$s</string>
     <string name="nexus_fomod_installer">FOMOD installer</string>
     <string name="nexus_configure">Configure</string>
+    <string name="nexus_review_placement">Review placement</string>
     <string name="nexus_fomod_step_option_count">%1$d step(s), %2$d option(s)</string>
     <string name="nexus_fomod_required_mappings">%1$d required file mapping(s)</string>
     <string name="nexus_fomod_complete_required_groups">Complete required FOMOD groups: %1$s</string>
@@ -2042,9 +2043,58 @@
     <string name="nexus_remove_placement_row">Remove placement row</string>
     <string name="nexus_source_folder_label">Folder/file from the mod</string>
     <string name="nexus_destination_folder">Destination Folder</string>
+    <string name="nexus_search_destination">Search this folder</string>
+    <string name="nexus_show_hidden_files">Show hidden files and folders</string>
+    <string name="nexus_new_destination_folder">New folder</string>
+    <string name="nexus_new_destination_folder_description">Choose a folder name inside the current destination.</string>
+    <string name="nexus_folder_name">Folder name</string>
+    <string name="nexus_folder_created_when_applied">Nothing is changed yet. The folder will be created only when the reviewed plan is applied.</string>
+    <string name="nexus_use_folder">Use folder</string>
+    <string name="nexus_will_be_created">Will be created</string>
+    <string name="nexus_destination_folder_empty">No matching files or folders</string>
+    <string name="nexus_impact_will_add">Will add</string>
+    <string name="nexus_impact_will_replace">Will replace</string>
+    <string name="nexus_impact_will_backup">Will back up</string>
+    <string name="nexus_impact_plan_conflict">Plan conflict</string>
+    <string name="nexus_impact_managed_by_this_mod">Managed by this mod</string>
+    <string name="nexus_impact_managed_by_mod">Managed by %1$s</string>
+    <string name="nexus_impact_modified">Changed since deployment</string>
+    <string name="nexus_impact_game_or_unmanaged">Game or unmanaged file</string>
+    <string name="nexus_impact_will_receive_files">Will receive files</string>
     <string name="nexus_install_method">Install method</string>
-    <string name="nexus_create_folder_for_selection">Create a folder for the selection</string>
-    <string name="nexus_create_folder_for_selection_description">On: The selected folder is installed into the destination. Off: Only its contents are placed there.</string>
+    <string name="nexus_advanced_placement">Advanced placement</string>
+    <string name="nexus_hide_advanced_placement">Hide advanced placement</string>
+    <string name="nexus_advanced_placement_description">Automatic placement is a best estimate. Check that the planned files and destinations match the mod’s installation instructions. If they do not, open Advanced placement and choose Custom to map them yourself.</string>
+    <string name="nexus_folder_layout">At the destination, install</string>
+    <string name="nexus_everything_folder_layout">Top-level folders keep their names; root files go directly in the destination</string>
+    <string name="nexus_install_contents_of">Contents of %1$s</string>
+    <string name="nexus_install_folder_and_contents">%1$s folder and its contents</string>
+    <string name="nexus_merge_selected_folder_contents">Merge selected folder contents</string>
+    <string name="nexus_keep_selected_folder_names">Keep each selected folder name</string>
+    <string name="nexus_recommended_suffix">\u0020(Recommended)</string>
+    <string name="nexus_folder_layout_result">Result: %1$s</string>
+    <string name="nexus_duplicate_folder_warning">This creates a repeated folder name such as Data/Data. Choose contents unless the mod specifically requires the extra folder.</string>
+    <string name="nexus_why_this_placement">Why this placement?</string>
+    <string name="nexus_hide_placement_reason">Hide placement details</string>
+    <string name="nexus_use_this_placement">Use this placement</string>
+    <string name="nexus_resolve_files">Resolve %1$d files</string>
+    <string name="nexus_resolve_files_description">Switches to custom placement with the recommended mappings preserved so unresolved files can be assigned safely.</string>
+    <string name="nexus_review_all_files">Review all files (%1$d)</string>
+    <string name="nexus_all_planned_files">All planned files</string>
+    <string name="nexus_search_planned_files">Search source, destination, or reason</string>
+    <string name="nexus_all_files_count">All (%1$d)</string>
+    <string name="nexus_no_matching_planned_files">No planned files match this filter</string>
+    <string name="nexus_previous_destination_value">Previous: %1$s</string>
+    <string name="nexus_destination_value">Destination: %1$s</string>
+    <string name="nexus_browse_destination">Browse destination</string>
+    <string name="nexus_destination_contents">Destination contents</string>
+    <string name="nexus_plan_group_added">Added</string>
+    <string name="nexus_plan_group_replaced">Replaced</string>
+    <string name="nexus_plan_group_moved">Moved</string>
+    <string name="nexus_plan_group_removed">Removed</string>
+    <string name="nexus_plan_group_ignored">Ignored</string>
+    <string name="nexus_plan_group_blocked">Blocked</string>
+    <string name="nexus_plan_group_unchanged">Unchanged</string>
     <string name="nexus_hide_manual_paths">Hide manual paths</string>
     <string name="nexus_manual_paths">Manual paths</string>
     <string name="nexus_source_folders_files_label">Folders/files from the mod</string>
@@ -2125,12 +2175,39 @@
     <string name="nexus_mod_order_already_applying">Mod order is already applying.</string>
     <string name="nexus_applying_order_may_take_time">Applying mod order. Large mod lists may take a while.</string>
     <string name="nexus_checking_mod_order">Checking mod order</string>
+    <string name="nexus_mod_order_blocked_managed_files" tools:ignore="MissingTranslation">Mod order was not changed because %1$d managed file(s) are missing or modified. Run Install health and resolve those files first.</string>
     <string name="nexus_fix_plugin_warnings_before_apply">Fix plugin master warnings before applying order.</string>
     <string name="nexus_checking_file_conflicts">Checking file conflicts</string>
     <string name="nexus_profile_order_target_files_exist">Profile order has existing target files. Use Overwrite files and create backups for mods that should win conflicts.</string>
     <string name="nexus_storage_low_apply_order">Storage is too low to apply mod order. Free at least %1$s more.</string>
     <string name="nexus_applying_mod_order">Applying mod order</string>
     <string name="nexus_refreshing_install_health">Refreshing install health</string>
+    <string name="nexus_plan_review_title">Placement review</string>
+    <string name="nexus_plan_coverage">%1$d of %2$d files planned • %3$d ignored • %4$d need review</string>
+    <string name="nexus_fomod_defaults_replaced">%1$d default file(s) replaced by your FOMOD choices</string>
+    <string name="nexus_fomod_selected_winner" tools:ignore="MissingTranslation">%1$s ← %2$s</string>
+    <string name="nexus_plan_ranked">Ranked suggestions</string>
+    <string name="nexus_plan_score">%1$d. %2$s — %3$d%% coverage</string>
+    <string name="nexus_plan_case_merge">Case merge: %1$s</string>
+    <string name="nexus_plan_ambiguous_case">ambiguous case variants already exist</string>
+    <string name="nexus_plan_blocked">Automatic apply is blocked until every installable file has a proven destination.</string>
+    <string name="nexus_plan_export">Share diagnostic</string>
+    <string name="nexus_reconfiguration_preview">Reconfiguration preview</string>
+    <string name="nexus_reconfiguration_summary">%1$d added • %2$d changed • %3$d moved • %4$d stale</string>
+    <string name="nexus_choose_package_variant">Choose a package variant</string>
+    <string name="nexus_confirm_risky_game_root_files">I reviewed these game-root files</string>
+    <string name="nexus_confirm_risky_game_root_files_description">DLL, EXE, and loader files can change how the game starts. Confirm only when this archive is trusted and the preview matches its installation instructions.</string>
+    <string name="nexus_building_install_plan">Building the file placement plan…</string>
+    <string name="nexus_reapply_missing_files">Reapply missing files</string>
+    <string name="nexus_adopt_ownership">Verify and track files</string>
+    <string name="nexus_ownership_adopted">Verified files are now tracked without changing them</string>
+    <string name="nexus_file_tracking_setup_failed">Could not verify and track installed files (%1$d issue(s))</string>
+    <string name="nexus_stale_placement_reason">No longer produced by this placement</string>
+    <string name="nexus_restore_previous_deployment">Restore previous deployment</string>
+    <string name="nexus_restore_previous_deployment_description">Returns this mod to its previous reviewed file plan. Externally modified files are preserved.</string>
+    <string name="nexus_restoring_previous_deployment">Restoring previous deployment</string>
+    <string name="nexus_previous_deployment_restored">Previous deployment restored</string>
+    <string name="nexus_previous_deployment_restore_failed">Could not restore the previous deployment (%1$d issue(s))</string>
     <string name="nexus_mod_order_applied">Mod order applied%1$s%2$s</string>
     <string name="nexus_mod_order_applied_with_errors">Mod order applied with %1$d error(s)%2$s%3$s</string>
     <string name="nexus_apply_mod_order_failed">Failed to apply mod order</string>
@@ -2179,8 +2256,12 @@
     <string name="nexus_resolve_url_failed">Failed to resolve Nexus URL</string>
     <string name="nexus_applying_mod_files">Applying mod files</string>
     <string name="nexus_applied_items_backups">Applied %1$d item(s), backed up %2$d%3$s</string>
+    <string name="nexus_placement_complete_summary" tools:ignore="MissingTranslation">Placement complete for %1$d item(s): %2$d updated, %3$d already current, %4$d backed up%5$s</string>
     <string name="nexus_old_files_left_in_place_suffix">; %1$d old file(s) left in place</string>
-    <string name="nexus_applied_with_errors">Applied with %1$d error(s)</string>
+    <string name="nexus_apply_failed_rolled_back" tools:ignore="MissingTranslation,PluralsCandidate">Install failed; safe rollback attempted (%1$d error(s))</string>
+    <string name="nexus_apply_failure_title" tools:ignore="MissingTranslation">Last mod install failed</string>
+    <string name="nexus_apply_failure_description" tools:ignore="MissingTranslation">The mod was not marked as applied. Changes were rolled back where they could be verified safely. Review the file errors below, then return to Placement to correct or retry this mod.</string>
+    <string name="nexus_apply_failure_details" tools:ignore="MissingTranslation,PluralsCandidate">%1$d file error(s)</string>
     <string name="nexus_mod_apply_already_running">Mod files are already being applied.</string>
     <string name="nexus_failed_to_apply_mod">Failed to apply mod</string>
     <string name="nexus_fomod_or_custom_required">Configure the FOMOD installer or choose Custom placement before applying.</string>
@@ -2468,6 +2549,9 @@
     <string name="power_control_strategy_conservative">Conservative</string>
     <string name="power_control_strategy_conservative_desc">AdjustsGradual gradually with a focus on stability</string>
     <string name="xr_refresh_rate">VR Refresh Rate</string>
+    <string name="nexus_previous_rule_page">Previous placement-rule page</string>
+    <string name="nexus_next_rule_page">Next placement-rule page</string>
+    <string name="nexus_placement_rule_range">Placement rules %1$d–%2$d of %3$d</string>
     <string name="binding_mode_simultaneous">Simultaneous</string>
     <string name="binding_mode_sequence">Sequence</string>
     <string name="binding_sequence_delay_ms">Sequence delay (ms)</string>

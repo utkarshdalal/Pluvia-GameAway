@@ -223,6 +223,9 @@ data class ModPlacementRecipe(
     @ColumnInfo(name = "target_relative_path")
     val targetRelativePath: String = "",
 
+    @ColumnInfo(name = "target_file_name")
+    val targetFileName: String = "",
+
     @ColumnInfo(name = "mode")
     val mode: String = ModPlacementMode.SYMLINK.name,
 

@@ -15,6 +15,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -85,6 +86,37 @@ class ModDaoLocalImportTest {
             dao.getInstall(install.installId)?.status,
         )
         assertNotNull(dao.getProfileInstallState(profile.profileId, install.installId))
+    }
+
+    @Test
+    fun profileUpsert_preservesEveryDependentInstallState() = runBlocking {
+        val profile = ModProfile(
+            profileId = "profile",
+            appId = APP_ID,
+            name = "Default",
+        )
+        val first = localInstall("first", ModInstallStatus.APPLIED)
+        val second = localInstall("second", ModInstallStatus.APPLIED)
+        dao.upsertProfile(profile)
+        dao.upsertInstall(first)
+        dao.upsertInstall(second)
+        listOf(first, second).forEachIndexed { priority, install ->
+            dao.upsertProfileInstallState(
+                ModProfileInstallState(
+                    profileId = profile.profileId,
+                    installId = install.installId,
+                    appId = APP_ID,
+                    enabled = true,
+                    priority = priority,
+                ),
+            )
+        }
+
+        dao.upsertProfile(profile.copy(active = true, updatedAt = profile.updatedAt + 1))
+
+        val states = dao.getProfileInstallStates(APP_ID, profile.profileId)
+        assertEquals(setOf("first", "second"), states.map { it.installId }.toSet())
+        assertTrue(states.all { it.enabled })
     }
 
     @Test

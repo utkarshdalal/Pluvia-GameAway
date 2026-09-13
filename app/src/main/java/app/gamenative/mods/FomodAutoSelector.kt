@@ -16,11 +16,22 @@ object FomodAutoSelector {
         installer: FomodInstaller,
         targetRoot: String = ModTargetRoot.GAME_DIR.name,
         targetRelativePath: String = "Data",
+        environment: FomodEnvironmentSnapshot = FomodEnvironmentSnapshot(),
     ): FomodAutoSelectionResult? {
         if (installer.unsupportedWarnings.isNotEmpty()) return null
-        if (installer.steps.any { step -> step.groups.any { group -> group.plugins.any { it.typePatterns.isNotEmpty() } } }) {
+        val hasDynamicPluginTypes = installer.steps.any { step ->
+            step.groups.any { group ->
+                group.plugins.any { plugin -> plugin.typePatterns.isNotEmpty() }
+            }
+        }
+        if (hasDynamicPluginTypes) {
             return null
         }
+        if (installer.moduleDependencies.evaluate(emptyMap(), environment) != FomodFactState.TRUE) return null
+        val hasUnknownConditionalFiles = installer.conditionalFileInstalls.any { conditional ->
+            conditional.dependencies.evaluate(emptyMap(), environment) == FomodFactState.UNKNOWN
+        }
+        if (hasUnknownConditionalFiles) return null
 
         val selectedKeys = linkedSetOf<String>()
         val selectedLabels = mutableListOf<String>()
@@ -65,8 +76,8 @@ object FomodAutoSelector {
             targetRoot = targetRoot,
             targetRelativePath = targetRelativePath,
             mode = ModPlacementMode.OVERWRITE_COPY.name,
+            environment = environment,
         )
-        if (result.unsupportedMappings.isNotEmpty()) return null
         if (result.recipes.isEmpty()) return null
 
         return FomodAutoSelectionResult(

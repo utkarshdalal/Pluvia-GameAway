@@ -1,13 +1,16 @@
 package app.gamenative.mods
 
 import app.gamenative.data.ModPlacementMode
+import app.gamenative.data.ModInstall
 import app.gamenative.data.ModTargetRoot
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.File
+import java.util.Locale
 import kotlin.io.path.createTempDirectory
 
 class FomodInstallerTest {
@@ -29,6 +32,10 @@ class FomodInstallerTest {
             """
             <config>
                 <moduleName>Example Installer</moduleName>
+                <moduleDependencies operator="And">
+                    <fileDependency file="Data/Required.dll" state="Active" />
+                    <gameDependency version="1.6.0" />
+                </moduleDependencies>
                 <requiredInstallFiles>
                     <folder source="Common" destination="" priority="0" />
                 </requiredInstallFiles>
@@ -67,6 +74,42 @@ class FomodInstallerTest {
         assertEquals(FomodPluginType.RECOMMENDED, plugin.type)
         assertEquals("2K", plugin.conditionFlags["TextureSize"])
         assertEquals(2, plugin.files.size)
+        assertEquals("Data/Required.dll", installer.moduleDependencies.fileDependencies.single().file)
+        assertEquals("1.6.0", installer.moduleDependencies.gameDependencies.single().version)
+    }
+
+    @Test
+    fun parse_isIndependentOfTheDeviceLanguage() {
+        val previousLocale = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+            val moduleConfig = writeModuleConfig(
+                """
+                <config>
+                    <installSteps>
+                        <installStep name="Main">
+                            <optionalFileGroups>
+                                <group name="Choice" type="SelectExactlyOne">
+                                    <plugins>
+                                        <plugin name="Required option">
+                                            <typeDescriptor><type name="Required" /></typeDescriptor>
+                                        </plugin>
+                                    </plugins>
+                                </group>
+                            </optionalFileGroups>
+                        </installStep>
+                    </installSteps>
+                </config>
+                """.trimIndent(),
+            )
+
+            val installer = FomodParser.parse(moduleConfig)
+
+            assertEquals(FomodGroupType.SELECT_EXACTLY_ONE, installer.steps.single().groups.single().type)
+            assertEquals(FomodPluginType.REQUIRED, installer.steps.single().groups.single().plugins.single().type)
+        } finally {
+            Locale.setDefault(previousLocale)
+        }
     }
 
     @Test
@@ -108,7 +151,6 @@ class FomodInstallerTest {
             mode = ModPlacementMode.OVERWRITE_COPY.name,
         )
 
-        assertTrue(result.unsupportedMappings.isEmpty())
         assertEquals(
             listOf("Common->Data", "Option->Data/textures", "Plugins/Example.esp->Data"),
             result.recipes.map { "${it.sourceSubpath}->${it.targetRelativePath}" },
@@ -171,7 +213,7 @@ class FomodInstallerTest {
     }
 
     @Test
-    fun generate_reportsRenamedFileMappingsAsUnsupported() {
+    fun generate_preservesRenamedFileDestination() {
         val installer = FomodInstaller(
             moduleName = "Example",
             requiredFiles = listOf(FomodFileMapping("Plugins/Source.esp", "Renamed.esp", 0, directory = false)),
@@ -184,8 +226,7 @@ class FomodInstallerTest {
             selectedPluginNames = emptySet(),
         )
 
-        assertEquals(0, result.recipes.size)
-        assertEquals("Renamed.esp", result.unsupportedMappings.single().destination)
+        assertEquals("Renamed.esp", result.recipes.single().targetFileName)
     }
 
     @Test
@@ -384,6 +425,225 @@ class FomodInstallerTest {
         )
 
         assertEquals(listOf("PatchA"), result.recipes.map { it.sourceSubpath })
+    }
+
+    @Test
+    fun missingSelectedMapping_isAResolvableFileIssueWithoutADuplicateBlocker() {
+        val installer = FomodInstaller(
+            moduleName = "Missing source",
+            requiredFiles = listOf(FomodFileMapping("Missing.dll", "Missing.dll", priority = 0, directory = false)),
+            steps = emptyList(),
+        )
+
+        val plan = FomodRecipeGenerator.generateForPluginKeys(
+            installId = "missing",
+            installer = installer,
+            selectedPluginKeys = emptySet(),
+            extractedRoot = tempDir,
+        ).plan!!
+
+        assertEquals(1, plan.unresolvedCount)
+        assertTrue(plan.blockingIssues.isEmpty())
+        assertTrue(!plan.isComplete)
+    }
+
+    @Test
+    fun equalPrioritySelectedBodyFiles_overrideRequiredDefaultsDuringMaterialization() = runBlocking {
+        val moduleConfig = writeModuleConfig(
+            """
+            <config>
+              <moduleName>Body installer fixture</moduleName>
+              <requiredInstallFiles>
+                <folder source="00 Required (Slim)" destination="" priority="0" />
+              </requiredInstallFiles>
+              <installSteps><installStep name="Body"><optionalFileGroups>
+                <group name="Shape" type="SelectExactlyOne"><plugins>
+                  <plugin name="Vanilla"><conditionFlags>
+                    <flag name="BodyShape">Vanilla</flag>
+                  </conditionFlags></plugin>
+                </plugins></group>
+              </optionalFileGroups></installStep></installSteps>
+              <conditionalFileInstalls><patterns><pattern>
+                <dependencies><flagDependency flag="BodyShape" value="Vanilla" /></dependencies>
+                <files><folder source="02 Vanilla" destination="" priority="0" /></files>
+              </pattern></patterns></conditionalFileInstalls>
+            </config>
+            """.trimIndent(),
+        )
+        val relativeBody = "meshes/actors/character/character assets/femalebody_0.nif"
+        File(tempDir, "00 Required (Slim)/$relativeBody").apply {
+            parentFile?.mkdirs()
+            writeText("slim-default")
+        }
+        File(tempDir, "00 Required (Slim)/CalienteTools/base.osd").apply {
+            parentFile?.mkdirs()
+            writeText("required")
+        }
+        File(tempDir, "02 Vanilla/$relativeBody").apply {
+            parentFile?.mkdirs()
+            writeText("vanilla-selected")
+        }
+        val installer = FomodParser.parse(moduleConfig, tempDir)
+        val result = FomodRecipeGenerator.generateForPluginKeys(
+            installId = "body",
+            installer = installer,
+            selectedPluginKeys = setOf(FomodRecipeGenerator.pluginKey(0, 0, 0)),
+            extractedRoot = tempDir,
+        )
+        val plan = result.plan!!
+
+        assertTrue(plan.blockingIssues.toString(), plan.isComplete)
+        assertEquals(
+            "02 Vanilla/$relativeBody",
+            plan.files.single { it.targetRelativePath == "Data/$relativeBody" && it.status == PlannedFileStatus.PLACED }
+                .sourceRelativePath,
+        )
+        assertEquals(
+            PlannedFileStatus.INTENTIONALLY_IGNORED,
+            plan.files.single { it.sourceRelativePath == "00 Required (Slim)/$relativeBody" }.status,
+        )
+
+        val game = File(tempDir, "game").apply { mkdirs() }
+        val install = ModInstall(
+            installId = "body",
+            appId = "game",
+            modName = "Body installer fixture",
+            fileName = "fixture.zip",
+            archivePath = "",
+            extractedPath = tempDir.absolutePath,
+        )
+        val materialization = ModMaterializer.materializationPlan(
+            install = install,
+            recipes = result.recipes,
+            gameRootDir = game,
+            winePrefix = "",
+            reviewedPlan = plan,
+        )
+        val applied = ModMaterializer.apply(install, materialization, File(tempDir, "backups"), allowOverwrite = true)
+
+        assertTrue(applied.errors.toString(), applied.errors.isEmpty())
+        assertEquals("vanilla-selected", File(game, "Data/$relativeBody").readText())
+        assertEquals("required", File(game, "Data/CalienteTools/base.osd").readText())
+    }
+
+    @Test
+    fun mcmHelperShape_plansAndAppliesEverySelectedFile() = runBlocking {
+        val moduleConfig = writeModuleConfig(
+            """
+            <config>
+              <moduleName>MCM Helper fixture</moduleName>
+              <requiredInstallFiles>
+                <file source="Data/MCM/Config/SkyUI_SE/config.json" destination="MCM/Config/SkyUI_SE/config.json" />
+                <file source="Data/MCM/Config/SkyUI_SE/settings.ini" destination="MCM/Config/SkyUI_SE/settings.ini" />
+                <file source="Data/MCM/Settings/readme.txt" destination="MCM/Settings/readme.txt" />
+                <file source="Data/Source/Scripts/SKI_ConfigMenu.psc" destination="Source/Scripts/SKI_ConfigMenu.psc" />
+              </requiredInstallFiles>
+              <installSteps><installStep name="Choices"><optionalFileGroups>
+                <group name="Runtime" type="SelectExactlyOne"><plugins>
+                  <plugin name="Skyrim SE"><files><folder source="SkyrimSE" destination="" /></files></plugin>
+                  <plugin name="Skyrim VR"><files><folder source="SkyrimVR" destination="" /></files></plugin>
+                </plugins></group>
+                <group name="Plugin" type="SelectExactlyOne"><plugins>
+                  <plugin name="ESL"><files><file source="Plugins/MCMHelper.esl" destination="MCMHelper.esl" /></files></plugin>
+                  <plugin name="ESP"><files><file source="Plugins/MCMHelper.esp" destination="MCMHelper.esp" /></files></plugin>
+                </plugins></group>
+                <group name="Assets" type="SelectExactlyOne"><plugins>
+                  <plugin name="BSA"><files><file source="BSA/MCMHelper.bsa" destination="MCMHelper.bsa" /></files></plugin>
+                  <plugin name="Loose"><files><folder source="Loose" destination="" /></files></plugin>
+                </plugins></group>
+              </optionalFileGroups></installStep></installSteps>
+            </config>
+            """.trimIndent(),
+        )
+        listOf(
+            "Data/MCM/Config/SkyUI_SE/config.json",
+            "Data/MCM/Config/SkyUI_SE/settings.ini",
+            "Data/MCM/Settings/readme.txt",
+            "Data/Source/Scripts/SKI_ConfigMenu.psc",
+            "SkyrimSE/SKSE/Plugins/MCMHelper.dll",
+            "SkyrimSE/SKSE/Plugins/MCMHelper.pdb",
+            "SkyrimVR/SKSE/Plugins/MCMHelper.dll",
+            "Plugins/MCMHelper.esl",
+            "Plugins/MCMHelper.esp",
+            "BSA/MCMHelper.bsa",
+            "Loose/MCM/Config/SkyUI_SE/loose.json",
+        ).forEach { path ->
+            File(tempDir, path).apply {
+                parentFile?.mkdirs()
+                writeText(path)
+            }
+        }
+        val installer = FomodParser.parse(moduleConfig, tempDir)
+        val result = FomodRecipeGenerator.generateForPluginKeys(
+            installId = "mcm",
+            installer = installer,
+            selectedPluginKeys = setOf("0:0:0", "0:1:0", "0:2:0"),
+            extractedRoot = tempDir,
+        )
+        val expected = setOf(
+            "Data/MCM/Config/SkyUI_SE/config.json",
+            "Data/MCM/Config/SkyUI_SE/settings.ini",
+            "Data/MCM/Settings/readme.txt",
+            "Data/Source/Scripts/SKI_ConfigMenu.psc",
+            "Data/SKSE/Plugins/MCMHelper.dll",
+            "Data/SKSE/Plugins/MCMHelper.pdb",
+            "Data/MCMHelper.esl",
+            "Data/MCMHelper.bsa",
+        )
+
+        assertTrue(result.plan!!.isComplete)
+        assertEquals(
+            expected,
+            result.plan.files.filter { it.status == PlannedFileStatus.PLACED }.map { it.targetRelativePath }.toSet(),
+        )
+
+        val game = File(tempDir, "game").apply { mkdirs() }
+        val install = ModInstall(
+            installId = "mcm",
+            appId = "game",
+            modName = "MCM Helper fixture",
+            fileName = "fixture.zip",
+            archivePath = "",
+            extractedPath = tempDir.absolutePath,
+        )
+        val executionPlan = ModMaterializer.materializationPlan(
+            install = install,
+            recipes = result.recipes,
+            gameRootDir = game,
+            winePrefix = "",
+            reviewedPlan = result.plan,
+        )
+        val applied = ModMaterializer.apply(
+            install = install,
+            plan = executionPlan,
+            backupRoot = File(tempDir, "backups"),
+            allowOverwrite = true,
+        )
+        assertTrue(applied.errors.isEmpty())
+        assertEquals(result.plan!!.placedCount, executionPlan.files.size)
+        assertEquals(result.plan.digest, executionPlan.reviewedPlan.digest)
+        assertEquals(
+            expected,
+            game.walkTopDown().filter { it.isFile }
+                .map { it.relativeTo(game).path.replace(File.separatorChar, '/') }
+                .toSet(),
+        )
+    }
+
+    @Test
+    fun generate_preservesDistinctDestinationNamesForTheSameSourceFile() {
+        val installer = FomodInstaller(
+            moduleName = "Renamed files",
+            requiredFiles = listOf(
+                FomodFileMapping("Shared/config.ini", "First.ini", 0, directory = false),
+                FomodFileMapping("Shared/config.ini", "Second.ini", 1, directory = false),
+            ),
+            steps = emptyList(),
+        )
+
+        val result = FomodRecipeGenerator.generate("install", installer, emptySet())
+
+        assertEquals(setOf("First.ini", "Second.ini"), result.recipes.mapTo(mutableSetOf()) { it.targetFileName })
     }
 
     private fun writeModuleConfig(xml: String): File {
