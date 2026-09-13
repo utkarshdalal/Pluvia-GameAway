@@ -1283,6 +1283,7 @@ https://gamenative.app
     <string name="downloads_status_complete">Завершено</string>
     <string name="downloads_status_failed">Ошибка</string>
     <string name="downloads_status_paused">Приостановлено</string>
+    <string name="downloads_status_queued">В очереди</string>
     <string name="downloads_summary">Управляйте активными загрузками и хранилищем в одном месте</string>
     <string name="storage_internal">Внутренняя</string>
     <string name="storage_external">Внешняя</string>
@@ -2439,4 +2440,8 @@ https://gamenative.app
     <string name="gyro_degrees_per_second_value">%1$.1f°/с</string>
     <string name="gyro_milliseconds_value">%1$d мс</string>
     <string name="reset_gyro_settings">Сбросить настройки гироскопа</string>
+    <string name="settings_downloads_battery_title">Загрузка в фоне</string>
+    <string name="settings_downloads_battery_subtitle_exempt">Загрузки продолжаются, когда устройство спит. Оптимизация батареи отключена для GameNative.</string>
+    <string name="settings_downloads_battery_subtitle_restricted">Загрузки могут останавливаться, когда устройство засыпает. Включите, чтобы отключить оптимизацию батареи для GameNative.</string>
+    <string name="downloads_notification_active">Загрузка игр…</string>
 </resources>

@@ -111,6 +111,7 @@
     <string name="downloads_status_complete">Abgeschlossen</string>
     <string name="downloads_status_failed">Fehlgeschlagen</string>
     <string name="downloads_status_paused">Pausiert</string>
+    <string name="downloads_status_queued">In Warteschlange</string>
     <string name="downloads_summary">Aktive Downloads und Speicher an einem Ort verwalten</string>
     <string name="storage_internal">Intern</string>
     <string name="storage_external">Extern</string>
@@ -2445,4 +2446,8 @@
     <string name="gyro_degrees_per_second_value">%1$.1f°/s</string>
     <string name="gyro_milliseconds_value">%1$d ms</string>
     <string name="reset_gyro_settings">Gyro-Einstellungen zurücksetzen</string>
+    <string name="settings_downloads_battery_title">Downloads im Hintergrund ausführen</string>
+    <string name="settings_downloads_battery_subtitle_exempt">Downloads laufen weiter, während das Gerät schläft. Die Akkuoptimierung ist für GameNative deaktiviert.</string>
+    <string name="settings_downloads_battery_subtitle_restricted">Downloads können stoppen, wenn das Gerät schläft. Aktivieren, um die Akkuoptimierung für GameNative zu deaktivieren.</string>
+    <string name="downloads_notification_active">Spiele werden heruntergeladen…</string>
 </resources>

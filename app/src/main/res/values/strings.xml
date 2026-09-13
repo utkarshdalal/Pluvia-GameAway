@@ -1087,6 +1087,10 @@
 
     <!-- Settings: Performance Group -->
     <string name="settings_performance_title">Performance</string>
+    <string name="settings_downloads_battery_title">Run downloads in the background</string>
+    <string name="settings_downloads_battery_subtitle_exempt">Downloads continue while the device sleeps. Battery optimization is disabled for GameNative.</string>
+    <string name="settings_downloads_battery_subtitle_restricted">Downloads may stop when the device sleeps. Turn on to disable battery optimization for GameNative.</string>
+    <string name="downloads_notification_active">Downloading games…</string>
     <string name="settings_performance_power_control_title">Power Control</string>
     <string name="settings_performance_power_control_subtitle">Enable in-game power control by default (enabled on tested devices: AYN Odin 3, Retroid Pocket 6/Nova)</string>
 
@@ -1182,6 +1186,7 @@
     <string name="downloads_clear_finished">Clear</string>
     <string name="downloads_resume_available">Ready to resume</string>
     <string name="downloads_status_paused">Paused</string>
+    <string name="downloads_status_queued">Queued</string>
     <string name="downloads_status_complete">Complete</string>
     <string name="downloads_status_cancelled">Cancelled</string>
     <string name="downloads_status_failed">Failed</string>

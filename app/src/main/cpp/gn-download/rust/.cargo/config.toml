@@ -1,0 +1,16 @@
+# Cross-compile settings for the Android builds of libgndownload.so.
+#
+# The linker is resolved by NAME on PATH: prepend the NDK's
+# `toolchains/llvm/prebuilt/<host>/bin` directory to PATH and export
+# CC_<target> / AR_<target> for the C-compiling dependencies (`ring`, pulled in
+# by rustls). API level 26 matches minSdkVersion in app/build.gradle.kts.
+
+[target.aarch64-linux-android]
+linker = "aarch64-linux-android26-clang"
+# max-page-size=16384: Google Play requires 16 KB page-size support (Android 15+);
+# without it the LOAD segments align to 0x1000 and the app fails Play review / on 16 KB devices.
+rustflags = ["-C", "link-arg=-Wl,-soname,libgndownload.so", "-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.armv7-linux-androideabi]
+linker = "armv7a-linux-androideabi26-clang"
+rustflags = ["-C", "link-arg=-Wl,-soname,libgndownload.so", "-C", "link-arg=-Wl,-z,max-page-size=16384"]

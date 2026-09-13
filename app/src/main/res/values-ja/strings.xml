@@ -1007,6 +1007,7 @@
     <string name="downloads_clear_finished">クリア</string>
     <string name="downloads_resume_available">再開の準備完了</string>
     <string name="downloads_status_paused">一時停止中</string>
+    <string name="downloads_status_queued">キュー待ち</string>
     <string name="downloads_status_complete">完了</string>
     <string name="downloads_status_cancelled">キャンセル</string>
     <string name="downloads_status_failed">失敗した</string>
@@ -2458,4 +2459,8 @@
     <string name="gyro_degrees_per_second_value">%1$.1f°/秒</string>
     <string name="gyro_milliseconds_value">%1$d ミリ秒</string>
     <string name="reset_gyro_settings">ジャイロ設定をリセット</string>
+    <string name="settings_downloads_battery_title">バックグラウンドでダウンロードを実行</string>
+    <string name="settings_downloads_battery_subtitle_exempt">デバイスのスリープ中もダウンロードを継続します。GameNative のバッテリー最適化は無効です。</string>
+    <string name="settings_downloads_battery_subtitle_restricted">デバイスがスリープするとダウンロードが停止する場合があります。オンにすると GameNative のバッテリー最適化が無効になります。</string>
+    <string name="downloads_notification_active">ゲームをダウンロード中…</string>
 </resources>

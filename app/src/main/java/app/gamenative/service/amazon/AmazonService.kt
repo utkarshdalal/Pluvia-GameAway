@@ -14,6 +14,8 @@ import app.gamenative.data.GameSource
 import app.gamenative.db.dao.AmazonGameDao
 import app.gamenative.enums.Marker
 import app.gamenative.events.AndroidEvent
+import app.gamenative.service.download.GameDownloadService
+import app.gamenative.service.download.NativeTreeDelete
 import app.gamenative.service.NotificationHelper
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.ExecutableSelectionUtils
@@ -435,12 +437,6 @@ class AmazonService : Service() {
             val instance = getInstance()
                 ?: return Result.failure(Exception("Amazon service is not running"))
 
-            // Already downloading?
-            instance.activeDownloads[productId]?.let { existing ->
-                Timber.tag("Amazon").w("Download already in progress for $productId")
-                return Result.success(existing)
-            }
-
             val game = withContext(Dispatchers.IO) {
                 instance.amazonManager.getGameById(productId)
             } ?: return Result.failure(Exception("Game not found: $productId"))
@@ -457,8 +453,21 @@ class AmazonService : Service() {
                 downloadInfo.initializeBytesDownloaded(persistedBytes)
             }
 
+            // Atomically claim productId: check, stale-entry replacement, and
+            // publication under one lock so concurrent downloadGame calls cannot
+            // both start a job.
+            synchronized(instance.activeDownloads) {
+                instance.activeDownloads[productId]?.let { existing ->
+                    if (existing.isActive()) {
+                        Timber.tag("Amazon").w("Download already in progress for $productId")
+                        return Result.success(existing)
+                    }
+                    // Stale inactive entry (e.g. a queued download being resumed).
+                    instance.activeDownloads.remove(productId, existing)
+                }
+                instance.activeDownloads[productId] = downloadInfo
+            }
             downloadInfo.setActive(true)
-            instance.activeDownloads[productId] = downloadInfo
             instance.activeDownloadPaths[productId] = installPath
 
             // Fresh install/update run should clear stale completion marker before starting
@@ -466,6 +475,13 @@ class AmazonService : Service() {
 
             PluviaApp.events.emitJava(
                 AndroidEvent.DownloadStatusChanged(game.appId, true)
+            )
+
+            // Register with centralized queue and auto-pause other downloads
+            GameDownloadService.registerDownload(
+                gameSource = GameSource.AMAZON,
+                gameId = productId,
+                downloadInfo = downloadInfo
             )
 
             val job = instance.serviceScope.launch {
@@ -479,30 +495,62 @@ class AmazonService : Service() {
 
                     if (result.isSuccess) {
                         Timber.tag("Amazon").i("Download succeeded for $productId")
+                        // A completed download must never remain queued: clear the
+                        // paused state so the finally below drops the active-map
+                        // entry even if a stray auto-pause landed in a race window.
+                        downloadInfo.clearQueuedState()
                         downloadInfo.setActive(false)
                         downloadInfo.clearPersistedBytesDownloaded(installPath)
                         SnackbarManager.show("Download completed: ${game.title}")
                         PluviaApp.events.emitJava(
                             AndroidEvent.LibraryInstallStatusChanged(game.appId, GameSource.AMAZON)
                         )
+
+                        // Unregister from queue (will auto-resume next paused download)
+                        GameDownloadService.unregisterDownload(GameSource.AMAZON, productId)
                     } else {
                         val error = result.exceptionOrNull()
                         Timber.tag("Amazon").e(error, "Download failed for $productId")
                         downloadInfo.setActive(false)
-                        instance.cleanupFailedInstall(context, game, installPath)
-                        SnackbarManager.show("Download failed: ${error?.message ?: "Unknown error"}")
+
+                        if (GameDownloadService.reportFailure(GameSource.AMAZON, productId, error?.message)) {
+                            // Transient failure: the queue holds the slot and
+                            // auto-retries with backoff. Keep the partial install
+                            // (no cleanup) so the retry resumes from it; the retry
+                            // marker set wasAutoPaused, so the finally below keeps
+                            // the active-map entry (UI shows Queued).
+                        } else {
+                            instance.cleanupFailedInstall(context, game, installPath)
+                            SnackbarManager.show("Download failed: ${error?.message ?: "Unknown error"}")
+
+                            // Unregister from queue so a paused download can resume
+                            GameDownloadService.unregisterDownload(GameSource.AMAZON, productId)
+                        }
                     }
                 } catch (e: Exception) {
                     if (e is java.util.concurrent.CancellationException) {
                         Timber.tag("Amazon").d("Download cancelled for $productId")
                     } else {
                         Timber.tag("Amazon").e(e, "Download exception for $productId")
-                        instance.cleanupFailedInstall(context, game, installPath)
+                        if (GameDownloadService.reportFailure(GameSource.AMAZON, productId, e.message)) {
+                            // Transient failure: queue-managed auto-retry; keep
+                            // the partial install and the active-map entry.
+                        } else {
+                            instance.cleanupFailedInstall(context, game, installPath)
+
+                            // Unregister from queue so a paused download can resume
+                            GameDownloadService.unregisterDownload(GameSource.AMAZON, productId)
+                        }
                     }
                     downloadInfo.setActive(false)
                 } finally {
-                    instance.activeDownloads.remove(productId)
-                    instance.activeDownloadPaths.remove(productId)
+                    // Keep an auto-paused (queued) entry so the UI keeps showing it as
+                    // Queued; remove(key, value) so a late finally never removes the
+                    // fresh entry of an already-resumed download.
+                    if (!downloadInfo.wasAutoPaused()) {
+                        instance.activeDownloads.remove(productId, downloadInfo)
+                        instance.activeDownloadPaths.remove(productId)
+                    }
                     PluviaApp.events.emitJava(
                         AndroidEvent.DownloadStatusChanged(game.appId, false)
                     )
@@ -522,6 +570,10 @@ class AmazonService : Service() {
             }
             Timber.tag("Amazon").i("Cancelling download for $productId")
             downloadInfo.cancel()
+            // Remove the map entry like GOG/Epic do: a queued (auto-paused)
+            // entry has no live job left whose finally could remove it.
+            instance.activeDownloads.remove(productId, downloadInfo)
+            instance.activeDownloadPaths.remove(productId)
             return true
         }
 
@@ -589,12 +641,12 @@ class AmazonService : Service() {
                                 )
                             } catch (e: Exception) {
                                 Timber.tag("Amazon").w(e, "Manifest parse failed — falling back to recursive delete")
-                                installDir.deleteRecursively()
+                                NativeTreeDelete.deleteTreeFast(installDir)
                             }
                         } else {
                             // ── Fallback: recursive delete ───────────────────────
                             Timber.tag("Amazon").i("No cached manifest — recursive delete: $path")
-                            installDir.deleteRecursively()
+                            NativeTreeDelete.deleteTreeFast(installDir)
                         }
 
                         MarkerUtils.removeMarker(path, Marker.DOWNLOAD_COMPLETE_MARKER)
@@ -603,7 +655,7 @@ class AmazonService : Service() {
                         // Remove metadata residue and ensure uninstall leaves no resumable state behind.
                         val downloadInfoDir = File(installDir, ".DownloadInfo")
                         if (downloadInfoDir.exists()) {
-                            downloadInfoDir.deleteRecursively()
+                            NativeTreeDelete.deleteTreeFast(downloadInfoDir)
                         }
 
                         if (installDir.exists()) {
@@ -613,7 +665,7 @@ class AmazonService : Service() {
                                 installCanonical.path.startsWith("${amazonRoot.path}${File.separator}")
 
                             if (isUnderAmazonRoot) {
-                                installCanonical.deleteRecursively()
+                                NativeTreeDelete.deleteTreeFast(installCanonical)
                             } else {
                                 Timber.tag("Amazon").w(
                                     "Skipping final recursive uninstall cleanup outside Amazon root: ${installCanonical.path}"
@@ -793,6 +845,23 @@ class AmazonService : Service() {
         super.onCreate()
         instance = this
         PluviaApp.events.on<AndroidEvent.EndProcess, Unit>(onEndProcess)
+
+        // Register resume listener with GameDownloadService
+        GameDownloadService.registerResumeListener(GameSource.AMAZON, object : GameDownloadService.ResumeListener {
+            override fun onResumeRequested(gameSource: GameSource, gameId: String) {
+                Timber.tag("Amazon").i("[AmazonService] Resume requested for product $gameId")
+                serviceScope.launch {
+                    val game = amazonManager.getGameById(gameId)
+                    if (game != null) {
+                        val installPath = game.installPath.ifBlank {
+                            AmazonConstants.getGameInstallPath(applicationContext, game.title)
+                        }
+                        downloadGame(applicationContext, gameId, installPath)
+                    }
+                }
+            }
+        })
+
         PluviaApp.events.emit(AndroidEvent.ServiceReady)
         Timber.i("[Amazon] Service created")
     }
@@ -856,6 +925,12 @@ class AmazonService : Service() {
         serviceScope.cancel()
         stopForeground(STOP_FOREGROUND_REMOVE)
         notificationHelper.cancel(NotificationHelper.NOTIFICATION_ID_AMAZON)
+
+        // Drop this source's queue entries before removing the listener that resumes them
+        GameDownloadService.unregisterAllForSource(GameSource.AMAZON)
+        // Unregister resume listener from GameDownloadService
+        GameDownloadService.unregisterResumeListener(GameSource.AMAZON)
+
         instance = null
         super.onDestroy()
         Timber.i("[Amazon] Service destroyed")
@@ -881,7 +956,7 @@ class AmazonService : Service() {
             runCatching {
                 val dir = File(installPath)
                 if (dir.exists()) {
-                    dir.deleteRecursively()
+                    NativeTreeDelete.deleteTreeFast(dir)
                 }
             }.onFailure {
                 Timber.tag("Amazon").w(it, "Failed to clean partial install dir for ${game.productId}")

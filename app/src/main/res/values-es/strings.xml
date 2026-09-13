@@ -125,6 +125,7 @@
     <string name="downloads_status_complete">Completado</string>
     <string name="downloads_status_failed">Fallido</string>
     <string name="downloads_status_paused">Pausado</string>
+    <string name="downloads_status_queued">En cola</string>
     <string name="downloads_summary">Gestiona descargas activas y almacenamiento en un solo lugar</string>
     <string name="storage_internal">Interno</string>
     <string name="storage_external">Externo</string>
@@ -2503,4 +2504,8 @@
     <string name="gyro_degrees_per_second_value">%1$.1f°/s</string>
     <string name="gyro_milliseconds_value">%1$d ms</string>
     <string name="reset_gyro_settings">Restablecer ajustes del giroscopio</string>
+    <string name="settings_downloads_battery_title">Ejecutar descargas en segundo plano</string>
+    <string name="settings_downloads_battery_subtitle_exempt">Las descargas continúan mientras el dispositivo está en reposo. La optimización de batería está desactivada para GameNative.</string>
+    <string name="settings_downloads_battery_subtitle_restricted">Las descargas pueden detenerse cuando el dispositivo entre en reposo. Actívalo para desactivar la optimización de batería de GameNative.</string>
+    <string name="downloads_notification_active">Descargando juegos…</string>
 </resources>

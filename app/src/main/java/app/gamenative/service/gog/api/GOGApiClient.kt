@@ -304,6 +304,43 @@ class GOGApiClient @Inject constructor(
     }
 
     /**
+     * Fetch depot manifest (Gen 2) and return the raw inflated JSON alongside the parsed form.
+     * The native GOG engine (GameDownloadService → libgndownload store_dl/gog) re-parses the
+     * raw JSON itself, so the byte-exact string must survive the trip.
+     */
+    suspend fun fetchDepotManifestWithRaw(manifestHash: String): Result<Pair<DepotManifest, String>> =
+        withContext(Dispatchers.IO) {
+            try {
+                val credentials = GOGAuthManager.getStoredCredentials(context).getOrNull()
+                    ?: return@withContext Result.failure(Exception("Not authenticated"))
+
+                val path = gogGalaxyPath(manifestHash)
+                val url = "$GOG_CDN/content-system/v2/meta/$path"
+
+                val request = Request.Builder()
+                    .url(url)
+                    .header("Authorization", "Bearer ${credentials.accessToken}")
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception("Failed to fetch depot manifest: HTTP ${response.code}"),
+                    )
+                }
+
+                val depotBytes = response.body?.bytes()
+                    ?: return@withContext Result.failure(Exception("Empty response"))
+
+                val depotStr = parser.decompressManifest(depotBytes)
+                Result.success(parser.parseDepotManifest(depotStr) to depotStr)
+            } catch (e: Exception) {
+                Timber.tag("GOG").e(e, "Failed to fetch depot manifest $manifestHash")
+                Result.failure(e)
+            }
+        }
+
+    /**
      * Fetch depot manifest (contains file list for a specific depot) — Gen 2
      *
      * @param manifestHash Hash from depot.manifest field

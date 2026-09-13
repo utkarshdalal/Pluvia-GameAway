@@ -12,6 +12,8 @@ import app.gamenative.data.LaunchInfo
 import app.gamenative.data.LibraryItem
 import app.gamenative.events.AndroidEvent
 import app.gamenative.PluviaApp
+import app.gamenative.data.GameSource
+import app.gamenative.service.download.GameDownloadService
 import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.service.NotificationHelper
 import app.gamenative.utils.ContainerUtils
@@ -361,9 +363,29 @@ class GOGService : Service() {
                 downloadInfo.initializeBytesDownloaded(persistedBytes)
             }
 
-            // Track in activeDownloads first
-            instance.activeDownloads[gameId] = downloadInfo
+            // Atomically claim gameId: check, stale-entry replacement, and publication
+            // under one lock so concurrent downloadGame calls cannot both start a job.
+            synchronized(instance.activeDownloads) {
+                val existing = instance.activeDownloads[gameId]
+                if (existing != null) {
+                    if (existing.isActive()) {
+                        Timber.w("[Download] Already in progress for game $gameId")
+                        return Result.success(existing)
+                    }
+                    // Stale inactive entry (e.g. a queued download being resumed).
+                    instance.activeDownloads.remove(gameId, existing)
+                }
+                // Track in activeDownloads first
+                instance.activeDownloads[gameId] = downloadInfo
+            }
             instance.notifierOrNull?.trackDownload(downloadInfo, "", NotificationHelper.NOTIFICATION_ID_GOG)
+
+            // Register with centralized queue and auto-pause other downloads
+            GameDownloadService.registerDownload(
+                gameSource = GameSource.GOG,
+                gameId = gameId,
+                downloadInfo = downloadInfo
+            )
 
             // Launch download in service scope so it runs independently
             val job = instance.scope.launch {
@@ -380,12 +402,34 @@ class GOGService : Service() {
                     if (result.isFailure) {
                         val error = result.exceptionOrNull()
                         Timber.e(error, "[Download] Failed for game $gameId")
-                        downloadInfo.setProgress(-1.0f)
                         downloadInfo.setActive(false)
 
-                        SnackbarManager.show("Download failed: ${error?.message ?: "Unknown error"}")
+                        if (GameDownloadService.reportFailure(GameSource.GOG, gameId, error?.message)) {
+                            // Transient failure: the queue holds the slot and
+                            // auto-retries with backoff. The retry marker set
+                            // wasAutoPaused, so the finally below keeps the
+                            // active-map entry (UI shows Queued).
+                        } else {
+                            downloadInfo.setProgress(-1.0f)
+                            SnackbarManager.show("Download failed: ${error?.message ?: "Unknown error"}")
+
+                            // Unregister from queue so a paused download can resume
+                            GameDownloadService.unregisterDownload(GameSource.GOG, gameId)
+                        }
                     } else {
                         Timber.i("[Download] Completed successfully for game $gameId")
+
+                        // A completed download must never remain queued: clear the
+                        // paused state so the finally below drops the active-map
+                        // entry even if a stray auto-pause landed in a race window.
+                        downloadInfo.clearQueuedState()
+
+                        // Transfer is complete — free the queue slot BEFORE post-install
+                        // sync so the next queued download can start. Holding the slot
+                        // through sync also lets a newly registered download auto-pause
+                        // this finished one; its later auto-resume re-verifies every
+                        // file ("1/N again" after reaching 100%).
+                        GameDownloadService.unregisterDownload(GameSource.GOG, gameId)
 
                         // Download cloud saves so they're ready before first launch.
                         // Status message keeps isDownloading() true so Play stays hidden during sync.
@@ -430,14 +474,29 @@ class GOGService : Service() {
                     downloadInfo.setPostInstallSyncing(false)
                     downloadInfo.updateStatusMessage(null)
                     PluviaApp.events.emit(AndroidEvent.PostInstallSyncStatusChanged(gameId.toIntOrNull() ?: -1, false))
-                    downloadInfo.setProgress(-1.0f)
                     downloadInfo.setActive(false)
 
-                    SnackbarManager.show("Download error: ${e.message ?: "Unknown error"}")
+                    if (GameDownloadService.reportFailure(GameSource.GOG, gameId, e.message)) {
+                        // Transient failure: the queue holds the slot and
+                        // auto-retries with backoff. The retry marker set
+                        // wasAutoPaused, so the finally below keeps the
+                        // active-map entry (UI shows Queued).
+                    } else {
+                        downloadInfo.setProgress(-1.0f)
+                        SnackbarManager.show("Download error: ${e.message ?: "Unknown error"}")
+
+                        // Unregister from queue so a paused download can resume
+                        GameDownloadService.unregisterDownload(GameSource.GOG, gameId)
+                    }
                 } finally {
                     // Remove from activeDownloads for both success and failure
-                    // so UI knows download is complete and to prevent stale entries
-                    instance.activeDownloads.remove(gameId)
+                    // so UI knows download is complete and to prevent stale entries.
+                    // Keep an auto-paused (queued) entry so the UI keeps showing it as
+                    // Queued; remove(key, value) so a late finally never removes the
+                    // fresh entry of an already-resumed download.
+                    if (!downloadInfo.wasAutoPaused()) {
+                        instance.activeDownloads.remove(gameId, downloadInfo)
+                    }
                     Timber.d("[Download] Finished for game $gameId, progress: ${downloadInfo.getProgress()}, active: ${downloadInfo.isActive()}")
                 }
             }
@@ -733,6 +792,25 @@ class GOGService : Service() {
         // Initialize notification helper for foreground service
         notificationHelper = NotificationHelper(applicationContext)
         PluviaApp.events.on<AndroidEvent.EndProcess, Unit>(onEndProcess)
+
+        // Register resume listener with GameDownloadService
+        GameDownloadService.registerResumeListener(GameSource.GOG, object : GameDownloadService.ResumeListener {
+            override fun onResumeRequested(gameSource: GameSource, gameId: String) {
+                Timber.i("[GOGService] Resume requested for game $gameId")
+                scope.launch {
+                    val game = gogManager.getGameFromDbById(gameId)
+                    if (game != null) {
+                        val installPath = game.installPath.ifBlank {
+                            GOGConstants.getGameInstallPath(game.title)
+                        }
+                        val container = ContainerUtils.getOrCreateContainer(applicationContext, "GOG_$gameId")
+                        val language = ContainerUtils.toContainerData(container).language
+                        downloadGame(applicationContext, gameId, installPath, language)
+                    }
+                }
+            }
+        })
+
         PluviaApp.events.emit(AndroidEvent.ServiceReady)
     }
 
@@ -833,6 +911,12 @@ class GOGService : Service() {
         scope.cancel() // Cancel any ongoing operations
         stopForeground(STOP_FOREGROUND_REMOVE)
         notificationHelper.cancel(NotificationHelper.NOTIFICATION_ID_GOG)
+
+        // Drop this source's queue entries before removing the listener that resumes them
+        GameDownloadService.unregisterAllForSource(GameSource.GOG)
+        // Unregister resume listener from GameDownloadService
+        GameDownloadService.unregisterResumeListener(GameSource.GOG)
+
         instance = null
     }
 

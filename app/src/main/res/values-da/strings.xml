@@ -72,6 +72,7 @@
     <string name="downloads_status_complete">Fuldført</string>
     <string name="downloads_status_failed">Mislykket</string>
     <string name="downloads_status_paused">Sat på pause</string>
+    <string name="downloads_status_queued">I kø</string>
     <string name="downloads_summary">Administrer aktive downloads og lager ét sted</string>
     <string name="storage_internal">Intern</string>
     <string name="storage_external">Ekstern</string>
@@ -2375,4 +2376,8 @@
     <string name="gyro_degrees_per_second_value">%1$.1f°/s</string>
     <string name="gyro_milliseconds_value">%1$d ms</string>
     <string name="reset_gyro_settings">Nulstil gyroindstillinger</string>
+    <string name="settings_downloads_battery_title">Kør downloads i baggrunden</string>
+    <string name="settings_downloads_battery_subtitle_exempt">Downloads fortsætter, mens enheden sover. Batterioptimering er deaktiveret for GameNative.</string>
+    <string name="settings_downloads_battery_subtitle_restricted">Downloads kan stoppe, når enheden sover. Slå til for at deaktivere batterioptimering for GameNative.</string>
+    <string name="downloads_notification_active">Downloader spil…</string>
 </resources>

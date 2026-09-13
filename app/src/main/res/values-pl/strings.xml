@@ -125,6 +125,7 @@
     <string name="downloads_status_complete">Ukończono</string>
     <string name="downloads_status_failed">Nieudane</string>
     <string name="downloads_status_paused">Wstrzymano</string>
+    <string name="downloads_status_queued">W kolejce</string>
     <string name="downloads_summary">Zarządzaj aktywnymi pobraniami i pamięcią w jednym miejscu</string>
     <string name="storage_internal">Wewnętrzny</string>
     <string name="storage_external">Zewnętrzny</string>
@@ -2511,4 +2512,8 @@
     <string name="gyro_degrees_per_second_value">%1$.1f°/s</string>
     <string name="gyro_milliseconds_value">%1$d ms</string>
     <string name="reset_gyro_settings">Resetuj ustawienia żyroskopu</string>
+    <string name="settings_downloads_battery_title">Pobieraj w tle</string>
+    <string name="settings_downloads_battery_subtitle_exempt">Pobieranie trwa, gdy urządzenie śpi. Optymalizacja baterii jest wyłączona dla GameNative.</string>
+    <string name="settings_downloads_battery_subtitle_restricted">Pobieranie może zostać przerwane, gdy urządzenie uśnie. Włącz, aby wyłączyć optymalizację baterii dla GameNative.</string>
+    <string name="downloads_notification_active">Pobieranie gier…</string>
 </resources>

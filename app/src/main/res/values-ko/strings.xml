@@ -125,6 +125,7 @@
     <string name="downloads_status_complete">완료됨</string>
     <string name="downloads_status_failed">실패</string>
     <string name="downloads_status_paused">일시중지됨</string>
+    <string name="downloads_status_queued">대기 중</string>
     <string name="downloads_summary">진행 중 %1$d개 • 재개 가능 %2$d개 • 완료 %3$d개</string>
     <string name="storage_internal">내부</string>
     <string name="storage_external">외부</string>
@@ -2499,4 +2500,8 @@
     <string name="gyro_degrees_per_second_value">%1$.1f°/초</string>
     <string name="gyro_milliseconds_value">%1$d ms</string>
     <string name="reset_gyro_settings">자이로 설정 초기화</string>
+    <string name="settings_downloads_battery_title">백그라운드에서 다운로드 실행</string>
+    <string name="settings_downloads_battery_subtitle_exempt">기기가 절전 상태여도 다운로드가 계속됩니다. GameNative의 배터리 최적화가 해제되어 있습니다.</string>
+    <string name="settings_downloads_battery_subtitle_restricted">기기가 절전 상태가 되면 다운로드가 중단될 수 있습니다. 켜면 GameNative의 배터리 최적화가 해제됩니다.</string>
+    <string name="downloads_notification_active">게임 다운로드 중…</string>
 </resources>

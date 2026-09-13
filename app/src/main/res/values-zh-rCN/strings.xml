@@ -116,6 +116,7 @@
     <string name="downloads_status_complete">已完成</string>
     <string name="downloads_status_failed">失败</string>
     <string name="downloads_status_paused">已暂停</string>
+    <string name="downloads_status_queued">排队中</string>
     <string name="downloads_summary">在一处管理活动下载和存储</string>
     <string name="storage_internal">内部</string>
     <string name="storage_external">外部</string>
@@ -2519,4 +2520,8 @@
     <string name="gyro_degrees_per_second_value">%1$.1f°/秒</string>
     <string name="gyro_milliseconds_value">%1$d 毫秒</string>
     <string name="reset_gyro_settings">重置陀螺仪设置</string>
+    <string name="settings_downloads_battery_title">在后台运行下载</string>
+    <string name="settings_downloads_battery_subtitle_exempt">设备休眠时下载仍会继续。GameNative 的电池优化已停用。</string>
+    <string name="settings_downloads_battery_subtitle_restricted">设备休眠时下载可能会停止。开启以为 GameNative 停用电池优化。</string>
+    <string name="downloads_notification_active">正在下载游戏…</string>
 </resources>

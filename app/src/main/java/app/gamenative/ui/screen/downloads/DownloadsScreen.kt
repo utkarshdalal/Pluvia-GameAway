@@ -754,6 +754,7 @@ private fun DownloadItemCard(
         DownloadItemStatus.FAILED,
         -> PluviaTheme.colors.accentDanger
         DownloadItemStatus.PAUSED,
+        DownloadItemStatus.QUEUED,
         DownloadItemStatus.RESUMABLE,
         -> PluviaTheme.colors.accentWarning
         DownloadItemStatus.DOWNLOADING -> PluviaTheme.colors.statusDownloading
@@ -1054,6 +1055,7 @@ private fun sourceLabel(gameSource: GameSource): String = when (gameSource) {
 @Composable
 private fun statusLabel(status: DownloadItemStatus): String = when (status) {
     DownloadItemStatus.DOWNLOADING -> stringResource(R.string.downloading)
+    DownloadItemStatus.QUEUED -> stringResource(R.string.downloads_status_queued)
     DownloadItemStatus.PAUSED -> stringResource(R.string.downloads_status_paused)
     DownloadItemStatus.RESUMABLE -> stringResource(R.string.downloads_resume_available)
     DownloadItemStatus.COMPLETED -> stringResource(R.string.downloads_status_complete)
@@ -1083,6 +1085,7 @@ private fun sourceContentColor(gameSource: GameSource): Color = when (gameSource
 private fun statusContainerColor(status: DownloadItemStatus): Color = when (status) {
     DownloadItemStatus.DOWNLOADING -> MaterialTheme.colorScheme.primaryContainer
     DownloadItemStatus.PAUSED,
+    DownloadItemStatus.QUEUED,
     DownloadItemStatus.RESUMABLE,
     -> MaterialTheme.colorScheme.secondaryContainer
     DownloadItemStatus.COMPLETED -> MaterialTheme.colorScheme.tertiaryContainer
@@ -1095,6 +1098,7 @@ private fun statusContainerColor(status: DownloadItemStatus): Color = when (stat
 private fun statusContentColor(status: DownloadItemStatus): Color = when (status) {
     DownloadItemStatus.DOWNLOADING -> MaterialTheme.colorScheme.onPrimaryContainer
     DownloadItemStatus.PAUSED,
+    DownloadItemStatus.QUEUED,
     DownloadItemStatus.RESUMABLE,
     -> MaterialTheme.colorScheme.onSecondaryContainer
     DownloadItemStatus.COMPLETED -> MaterialTheme.colorScheme.onTertiaryContainer

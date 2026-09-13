@@ -115,8 +115,8 @@ class GOGDownloadManagerTest {
         whenever(apiClient.fetchManifest(selectedBuild.link)).thenReturn(Result.success(manifest))
         whenever(parser.filterDepotsByLanguage(manifest, "english")).thenReturn(listOf(depot) to "en-US")
         whenever(parser.filterDepotsByOwnership(listOf(depot), setOf(gameId))).thenReturn(listOf(depot))
-        whenever(apiClient.fetchDepotManifest(depot.manifest)).thenReturn(
-            Result.success(DepotManifest(files = listOf(gameFile, supportFile), directories = emptyList(), links = emptyList())),
+        whenever(apiClient.fetchDepotManifestWithRaw(depot.manifest)).thenReturn(
+            Result.success(DepotManifest(files = listOf(gameFile, supportFile), directories = emptyList(), links = emptyList()) to "{}"),
         )
         whenever(parser.separateBaseDLC(listOf(gameFile, supportFile), gameId)).thenReturn(
             listOf(gameFile, supportFile) to emptyList(),

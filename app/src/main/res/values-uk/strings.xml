@@ -113,6 +113,7 @@
     <string name="downloads_status_complete">Завершено</string>
     <string name="downloads_status_failed">Помилка</string>
     <string name="downloads_status_paused">Призупинено</string>
+    <string name="downloads_status_queued">У черзі</string>
     <string name="downloads_summary">Керуйте активними завантаженнями та сховищем в одному місці</string>
     <string name="storage_internal">Внутрішня</string>
     <string name="storage_external">Зовнішня</string>
@@ -2507,4 +2508,8 @@
     <string name="gyro_degrees_per_second_value">%1$.1f°/с</string>
     <string name="gyro_milliseconds_value">%1$d мс</string>
     <string name="reset_gyro_settings">Скинути налаштування гіроскопа</string>
+    <string name="settings_downloads_battery_title">Завантажувати у фоні</string>
+    <string name="settings_downloads_battery_subtitle_exempt">Завантаження тривають, коли пристрій спить. Оптимізацію батареї вимкнено для GameNative.</string>
+    <string name="settings_downloads_battery_subtitle_restricted">Завантаження можуть зупинятися, коли пристрій засинає. Увімкніть, щоб вимкнути оптимізацію батареї для GameNative.</string>
+    <string name="downloads_notification_active">Завантаження ігор…</string>
 </resources>

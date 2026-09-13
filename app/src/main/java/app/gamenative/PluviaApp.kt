@@ -78,6 +78,9 @@ class PluviaApp : SplitCompatApplication() {
 
         NetworkMonitor.init(this)
 
+        // Lets the download queue hold a wake/Wi-Fi lock while downloads transfer.
+        app.gamenative.service.download.GameDownloadService.init(this)
+
         // Init our custom crash handler.
         CrashHandler.initialize(this)
 

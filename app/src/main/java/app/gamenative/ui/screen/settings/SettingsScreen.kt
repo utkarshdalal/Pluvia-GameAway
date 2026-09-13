@@ -28,6 +28,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
@@ -138,6 +139,15 @@ private fun SettingsScreenContent(
                     iconTint = PluviaTheme.colors.accentWarning,
                 ) {
                     SettingsGroupPerformance()
+                }
+
+                // Downloads section
+                SettingsSection(
+                    title = stringResource(R.string.settings_downloads_title),
+                    icon = Icons.Default.Download,
+                    iconTint = PluviaTheme.colors.accentCyan,
+                ) {
+                    SettingsGroupDownloads()
                 }
 
                 // Interface section

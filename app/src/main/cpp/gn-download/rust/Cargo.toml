@@ -1,0 +1,37 @@
+[package]
+name = "gn-download"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "gndownload"
+crate-type = ["rlib", "staticlib", "cdylib"]
+
+[dependencies]
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc", "block-padding"] }
+crc32fast = "1"
+hmac = "0.12"
+jni = "0.21"
+# Direct dep for pwrite/fallocate/statvfs on the download write path.
+libc = "0.2"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+lzma-rs = { version = "0.3", features = ["raw_decoder"] }
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "gzip"] }
+rsa = "0.9"
+ruzstd = "0.7"
+# Async fetch layer for depot chunk downloads (see fetch_core / depot_writer).
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "sync"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha1 = "0.10"
+sha2 = "0.10"
+zeroize = "1"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"

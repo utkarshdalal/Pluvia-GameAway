@@ -6,6 +6,7 @@ import app.gamenative.data.GOGCloudSavesLocation
 import app.gamenative.data.GOGCloudSavesLocationTemplate
 import app.gamenative.data.GOGGame
 import app.gamenative.data.GameSource
+import app.gamenative.service.download.NativeTreeDelete
 import app.gamenative.data.LaunchInfo
 import app.gamenative.data.LibraryItem
 import app.gamenative.db.dao.GOGGameDao
@@ -556,7 +557,7 @@ class GOGManager @Inject constructor(
                 for (path in pathsToClean) {
                     val dir = File(path)
                     if (dir.exists()) {
-                        if (dir.deleteRecursively()) {
+                        if (NativeTreeDelete.deleteTreeFast(dir)) {
                             Timber.i("Successfully deleted game directory: $path")
                         } else {
                             Timber.w("Failed to delete some game files at $path")
@@ -570,7 +571,7 @@ class GOGManager @Inject constructor(
                 }
 
                 // Drop any leftover chunk cache (kept on failed downloads for resume)
-                File(context.cacheDir, "gog_chunks/$gameId").deleteRecursively()
+                NativeTreeDelete.deleteTreeFast(File(context.cacheDir, "gog_chunks/$gameId"))
 
                 if (game != null) {
                     val updatedGame = game.copy(isInstalled = false, installPath = "")

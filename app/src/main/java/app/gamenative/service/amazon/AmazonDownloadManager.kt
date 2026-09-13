@@ -4,6 +4,11 @@ import android.content.Context
 import app.gamenative.data.AmazonGame
 import app.gamenative.data.DownloadInfo
 import app.gamenative.enums.Marker
+import app.gamenative.service.download.GameDownloadService
+import app.gamenative.service.download.NativeAmazonCancelCheck
+import app.gamenative.service.download.NativeAmazonDownload
+import app.gamenative.service.download.NativeAmazonDownloadListener
+import app.gamenative.utils.DownloadSpeedConfig
 import app.gamenative.utils.MarkerUtils
 import java.io.File
 import java.security.MessageDigest
@@ -112,41 +117,118 @@ class AmazonDownloadManager @Inject constructor(
             downloadInfo.setProgress(0f)
             downloadInfo.emitProgressChange()
 
-            // ── 5. Download files in parallel batches ────────────────────────
+            // ── 5. Download files — the byte-moving pool runs in Rust
+            //    (GameDownloadService → libgndownload store_dl/amazon). The Kotlin batch
+            //    loop below is kept only as a fallback when the native library is missing.
             val installDir = File(installPath)
             val baseUrl = spec.downloadUrl
-            var completedFiles = 0
-            val totalFiles = files.size
 
-            for (batch in files.chunked(MAX_PARALLEL_DOWNLOADS)) {
-                if (!downloadInfo.isActive()) {
+            if (NativeAmazonDownload.isAvailable()) {
+                val planJson = org.json.JSONArray().apply {
+                    for (file in files) {
+                        // Path-traversal guard (defense in depth; the native engine also
+                        // rejects these): a manifest path must never escape installDir.
+                        // FAIL rather than skip — silently dropping the file would let a
+                        // partial install be reported as complete.
+                        val rel = file.unixPath
+                        if (rel.isEmpty() || rel.startsWith("/") || rel.contains('\\') ||
+                            rel.split('/').any { it == ".." }
+                        ) {
+                            Timber.tag(TAG).e("Unsafe manifest path: $rel")
+                            return@withContext Result.failure(
+                                Exception("Manifest contains unsafe path: $rel"),
+                            )
+                        }
+                        val hashHex = file.hashBytes.joinToString("") { "%02x".format(it) }
+                        put(
+                            org.json.JSONObject()
+                                .put("relPath", rel)
+                                .put("url", appendPath(baseUrl, "files/$hashHex"))
+                                .put("size", file.size)
+                                .put("sha256hex", if (file.hashAlgorithm == 0) hashHex else ""),
+                        )
+                    }
+                }.toString()
+
+                var creditedBytes = 0L
+                val listener = object : NativeAmazonDownloadListener {
+                    override fun onProgress(bytesDone: Long, bytesTotal: Long, filesDone: Long, filesTotal: Long) {
+                        // Native callbacks fire from multiple fetch-pool threads; keep the
+                        // delta read-check-set atomic (same fix as Epic's listener).
+                        synchronized(this) {
+                            val delta = bytesDone - creditedBytes
+                            if (delta > 0L) {
+                                creditedBytes = bytesDone
+                                downloadInfo.updateBytesDownloaded(delta)
+                            }
+                        }
+                        downloadInfo.updateStatusMessage("Downloading ($filesDone/$filesTotal files)…")
+                        downloadInfo.emitProgressChange()
+                        downloadInfo.persistProgressSnapshot()
+                    }
+
+                    override fun onLog(line: String) {
+                        Timber.tag(TAG).d(line)
+                    }
+
+                    override fun onComplete(success: Boolean, error: String, bytesWritten: Long) = Unit
+                }
+
+                // Adaptive-window ceiling from the user's speed tier (was a hardcoded 6);
+                // process pool stays core-scaled.
+                val speedConfig = DownloadSpeedConfig()
+                val result = GameDownloadService.downloadAmazonFiles(
+                    planJson = planJson,
+                    installDir = installPath,
+                    maxWorkers = speedConfig.maxDownloads,
+                    processWorkers = speedConfig.maxDecompress,
+                    isCancelled = NativeAmazonCancelCheck { !downloadInfo.isActive() },
+                    listener = listener,
+                )
+                if (result.cancelled) {
                     Timber.tag(TAG).w("Download cancelled by user")
                     throw CancellationException("Download cancelled")
                 }
-
-                val results = batch.map { file ->
-                    async {
-                        downloadFileWithRetry(
-                            baseUrl = baseUrl,
-                            file = file,
-                            installDir = installDir,
-                            downloadInfo = downloadInfo,
-                        )
-                    }
-                }.awaitAll()
-
-                val failure = results.firstOrNull { it.isFailure }
-                if (failure != null) {
+                if (!result.success) {
                     MarkerUtils.removeMarker(installPath, Marker.DOWNLOAD_IN_PROGRESS_MARKER)
                     return@withContext Result.failure(
-                        failure.exceptionOrNull() ?: Exception("File download failed")
+                        Exception(result.error.ifEmpty { "File download failed" })
                     )
                 }
+            } else {
+                var completedFiles = 0
+                val totalFiles = files.size
 
-                completedFiles += batch.size
-                downloadInfo.updateStatusMessage("Downloading ($completedFiles/$totalFiles files)…")
-                downloadInfo.emitProgressChange()
-                downloadInfo.persistProgressSnapshot()
+                for (batch in files.chunked(MAX_PARALLEL_DOWNLOADS)) {
+                    if (!downloadInfo.isActive()) {
+                        Timber.tag(TAG).w("Download cancelled by user")
+                        throw CancellationException("Download cancelled")
+                    }
+
+                    val results = batch.map { file ->
+                        async {
+                            downloadFileWithRetry(
+                                baseUrl = baseUrl,
+                                file = file,
+                                installDir = installDir,
+                                downloadInfo = downloadInfo,
+                            )
+                        }
+                    }.awaitAll()
+
+                    val failure = results.firstOrNull { it.isFailure }
+                    if (failure != null) {
+                        MarkerUtils.removeMarker(installPath, Marker.DOWNLOAD_IN_PROGRESS_MARKER)
+                        return@withContext Result.failure(
+                            failure.exceptionOrNull() ?: Exception("File download failed")
+                        )
+                    }
+
+                    completedFiles += batch.size
+                    downloadInfo.updateStatusMessage("Downloading ($completedFiles/$totalFiles files)…")
+                    downloadInfo.emitProgressChange()
+                    downloadInfo.persistProgressSnapshot()
+                }
             }
 
             // ── 6. Cache manifest ────────────────────────────────────────

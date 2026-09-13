@@ -17,6 +17,12 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Keep the CPU + Wi-Fi radio alive while a download is transferring
+         (device asleep); released as soon as no download is active. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Lets the user exclude GameNative from battery optimization so Doze
+         does not suspend the network during multi-hour downloads. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -196,6 +202,15 @@
 
         <service
             android:name=".service.amazon.AmazonService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Process anchor while any download is transferring; started/stopped
+             by GameDownloadService. Lets downloads survive sleep independent
+             of any store service's lifecycle. -->
+        <service
+            android:name=".service.download.DownloadForegroundService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />

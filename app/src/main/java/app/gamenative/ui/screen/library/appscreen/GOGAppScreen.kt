@@ -577,6 +577,31 @@ class GOGAppScreen : BaseAppScreen() {
         val disposables = mutableListOf<() -> Unit>()
         var currentProgressListener: ((Float) -> Unit)? = null
 
+        fun attachProgressListener() {
+            // GOGService expects numeric gameId
+            val downloadInfo = GOGService.getDownloadInfo(libraryItem.gameId.toString()) ?: return
+            currentProgressListener?.let { listener ->
+                downloadInfo.removeProgressListener(listener)
+            }
+            val progressListener: (Float) -> Unit = { progress ->
+                onProgressChanged(progress)
+            }
+            downloadInfo.addProgressListener(progressListener)
+            currentProgressListener = progressListener
+        }
+
+        // Attach immediately if a download is already running (the DownloadStatusChanged
+        // event fired before this screen was composed and won't fire again).
+        if (isDownloading(context, libraryItem)) {
+            attachProgressListener()
+        }
+        disposables += {
+            currentProgressListener?.let { listener ->
+                GOGService.getDownloadInfo(libraryItem.gameId.toString())?.removeProgressListener(listener)
+                currentProgressListener = null
+            }
+        }
+
         // Listen for download status changes
         val downloadStatusListener: (app.gamenative.events.AndroidEvent.DownloadStatusChanged) -> Unit = { event ->
             Timber.tag(TAG).d("[OBSERVE] DownloadStatusChanged event received: event.appId=${event.appId}, libraryItem.gameId=${libraryItem.gameId}, match=${event.appId == libraryItem.gameId}")
@@ -584,28 +609,7 @@ class GOGAppScreen : BaseAppScreen() {
                 Timber.tag(TAG).d("[OBSERVE] Download status changed for ${libraryItem.appId}, isDownloading=${event.isDownloading}")
                 if (event.isDownloading) {
                     // Download started - attach progress listener
-                    // GOGService expects numeric gameId
-                    val downloadInfo = GOGService.getDownloadInfo(libraryItem.gameId.toString())
-                    if (downloadInfo != null) {
-                        // Remove previous listener if exists
-                        currentProgressListener?.let { listener ->
-                            downloadInfo.removeProgressListener(listener)
-                        }
-                        // Add new listener and track it
-                        val progressListener: (Float) -> Unit = { progress ->
-                            onProgressChanged(progress)
-                        }
-                        downloadInfo.addProgressListener(progressListener)
-                        currentProgressListener = progressListener
-
-                        // Add cleanup for this listener
-                        disposables += {
-                            currentProgressListener?.let { listener ->
-                                downloadInfo.removeProgressListener(listener)
-                                currentProgressListener = null
-                            }
-                        }
-                    }
+                    attachProgressListener()
                 } else {
                     // Download stopped/completed - clean up listener
                     currentProgressListener?.let { listener ->
